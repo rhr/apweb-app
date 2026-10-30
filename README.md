@@ -96,6 +96,29 @@ cd ../backend && .venv/bin/apw serve           # http://127.0.0.1:8000 (API docs
 - **Conflicts**: groups that different APWeb pages place differently.
 - **Search**: name autocomplete, plus full-text search over statements and references.
 
+## Asking questions (Claude)
+
+The **Ask** page, plus the question box on the home page, answers natural-language
+questions. Claude queries the store with the same tools the MCP server exposes, then
+writes an answer that links every taxon and reference it used. The page shows each
+lookup as it happens.
+
+```bash
+export ANTHROPIC_API_KEY=...       # or `ant auth login`; required for /ask only
+apw serve
+```
+
+- Code: `backend/src/apw/ask.py` (streaming tool-use loop), `apw/tools.py` (tool
+  definitions shared with the MCP server), `POST /api/ask` (Server-Sent Events).
+- Model settings: `claude-opus-5-5` with adaptive thinking at `medium` effort. Override
+  with `APW_MODEL` / `APW_EFFORT`. Server-side refusal fallback is on
+  (`fallbacks: "default"`).
+- Conversations are kept in server memory (follow-up questions work) and are lost on
+  restart. `APW_ASK_DISABLED=1` turns the feature off.
+- **Cost:** each question is several model calls, billed to the server's key. There is
+  no per-user rate limiting yet, so put authentication or a quota in front of it before
+  exposing it publicly.
+
 ## MCP server (for AI clients)
 
 ```bash
@@ -167,8 +190,9 @@ resolved against APWeb's bibliography using:
 
 - **M2 — API and browser** (done): FastAPI, a React/TypeScript app with a D3 tree
   viewer and source comparison, and an MCP server.
-- **M3 — Natural-language queries.** Claude with tool use over the query layer, plus
-  embeddings over claims and references for retrieval; answers cite claims and sources.
+- **M3 — Natural-language queries** (done): Claude with tool use over the query layer,
+  with streamed, linked answers. Possible next steps: embeddings for semantic retrieval
+  over characters and references, saved conversations, and an eval set of real questions.
 - **M4+ — More sources and synthesis.**
   - Open Tree of Life, WFO/IPNI identifiers, CrossRef/OpenAlex DOIs and abstracts, trait
     databases, published trees.

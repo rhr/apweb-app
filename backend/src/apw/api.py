@@ -5,13 +5,15 @@ If the frontend has been built (frontend/dist), it is served at / as well.
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Literal
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from . import config, db, service
 
@@ -107,6 +109,31 @@ def clades(a: str, b: str):
 def conflicts(source: str | None = SourceQ, limit: int = Query(200, le=1000)):
     with _con() as con:
         return service.conflicts(con, source, limit)
+
+
+class Question(BaseModel):
+    question: str
+    conversation_id: str | None = None
+
+
+@app.get("/api/ask/status")
+def ask_status():
+    from . import ask
+    return ask.status()
+
+
+@app.post("/api/ask")
+async def ask_question(q: Question):
+    """Answer a question with Claude and the store's tools, streamed as Server-Sent Events
+    (one JSON object per `data:` line; see apw.ask for the event types)."""
+    from . import ask
+
+    async def events():
+        async for e in ask.ask(q.question, q.conversation_id):
+            yield f"data: {json.dumps(e, ensure_ascii=False, default=str)}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 def _mount_frontend() -> None:

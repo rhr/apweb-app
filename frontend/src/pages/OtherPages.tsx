@@ -1,7 +1,32 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { ConceptLink, RankBadge, Status, fmtNum, shortLabel, sourceLabel, useAsync, useSources } from "../lib";
+
+function AskBox() {
+  const nav = useNavigate();
+  const [q, setQ] = useState("");
+  return (
+    <form
+      className="ask-box"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (q.trim()) nav(`/ask?q=${encodeURIComponent(q.trim())}`);
+      }}
+    >
+      <input
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Ask a question, e.g. “Which families moved between APG III and APG IV?”"
+        aria-label="Ask a question"
+      />
+      <button className="button" type="submit">
+        Ask
+      </button>
+    </form>
+  );
+}
 
 export function HomePage() {
   const state = useAsync(() => api.overview(), []);
@@ -14,6 +39,7 @@ export function HomePage() {
           Taxa, clades, characters and literature from P. F. Stevens' Angiosperm Phylogeny Website and the APG
           classifications, linked to their sources and comparable across versions.
         </p>
+        <AskBox />
         <div className="hero-actions">
           <Link to="/taxon/name/Angiospermae" className="button">Start at the angiosperms</Link>
           <Link to="/tree" className="button secondary">Phylogeny viewer</Link>

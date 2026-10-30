@@ -671,3 +671,116 @@ ol.refs li {
 .ref-title {
   font-size: 1.5rem;
 }
+
+/* ---------------------------------------------------------------- ask */
+
+.ask {
+  max-width: 860px;
+  margin: 0 auto;
+}
+.ask-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.examples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.6rem;
+  margin: 1rem 0 1.5rem;
+}
+.example {
+  font: inherit;
+  text-align: left;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.7em 0.9em;
+  cursor: pointer;
+}
+.example:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.example:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.turn {
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0 1.2rem;
+}
+.question {
+  font: 600 1.1rem Georgia, serif;
+  margin: 0.6em 0;
+}
+.activity {
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3em 0.8em;
+  margin: 0.4em 0 0.8em;
+}
+.activity summary {
+  cursor: pointer;
+}
+.activity ul {
+  margin: 0.3em 0;
+  padding-left: 1.2em;
+}
+.activity li.failed {
+  text-decoration: line-through;
+}
+.markdown {
+  line-height: 1.6;
+}
+.markdown table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.92rem;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--line);
+  padding: 0.3em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown code {
+  font-size: 0.88em;
+  background: var(--accent-soft);
+  padding: 0 0.25em;
+  border-radius: 3px;
+}
+.ask-form {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+  padding: 0.8rem 0;
+  background: var(--bg);
+}
+.ask-form textarea {
+  flex: 1;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5em 0.7em;
+  resize: vertical;
+}
+.ask-box {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 46em;
+  margin: 1rem 0 0.4rem;
+}
+.ask-box input {
+  flex: 1;
+  font-size: 1rem;
+  padding: 0.5em 0.7em;
+}

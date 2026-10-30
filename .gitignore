@@ -10,3 +10,4 @@ __pycache__/
 # node (M2)
 node_modules/
 dist/
+*.tsbuildinfo

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import { SearchBox } from "./components/SearchBox";
 import { SourceProvider, sourceLabel, useSources } from "./lib";
+import { AskPage } from "./pages/AskPage";
 import { ComparePage } from "./pages/ComparePage";
 import { ConflictsPage, HomePage, NotFoundPage, ReferencePage, SearchPage, TaxonByName } from "./pages/OtherPages";
 import { TaxonPage } from "./pages/TaxonPage";
@@ -38,6 +39,7 @@ function App() {
           Angiosperm Phylogeny <span>Explorer</span>
         </NavLink>
         <nav className="mainnav">
+          <NavLink to="/ask">Ask</NavLink>
           <NavLink to="/tree">Tree</NavLink>
           <NavLink to="/compare">Compare</NavLink>
           <NavLink to="/conflicts">Conflicts</NavLink>
@@ -52,6 +54,7 @@ function App() {
           <Route path="/taxon/:id" element={<TaxonPage />} />
           <Route path="/tree" element={<TreePage />} />
           <Route path="/tree/:id" element={<TreePage />} />
+          <Route path="/ask" element={<AskPage />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/conflicts" element={<ConflictsPage />} />
           <Route path="/search" element={<SearchPage />} />

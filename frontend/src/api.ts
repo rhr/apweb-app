@@ -186,7 +186,48 @@ async function get<T>(path: string, params: Record<string, string | number | boo
   return r.json() as Promise<T>;
 }
 
+export type AskEvent =
+  | { type: "conversation"; id: string }
+  | { type: "text"; text: string }
+  | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "tool_result"; id: string; summary: string; is_error: boolean }
+  | { type: "notice"; text: string }
+  | { type: "done"; usage: Record<string, number>; model: string }
+  | { type: "error"; text: string };
+
+/** POST a question and feed each server-sent event to `onEvent` until the stream ends. */
+export async function askStream(
+  question: string,
+  conversationId: string | null,
+  signal: AbortSignal,
+  onEvent: (e: AskEvent) => void,
+): Promise<void> {
+  const r = await fetch("/api/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, conversation_id: conversationId }),
+    signal,
+  });
+  if (!r.ok || !r.body) throw new ApiError(r.status, r.statusText);
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let i: number;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const chunk = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)) as AskEvent);
+      }
+    }
+  }
+}
+
 export const api = {
+  askStatus: () => get<{ enabled: boolean; model: string }>("/ask/status"),
   overview: () => get<Overview>("/overview"),
   sources: () => get<Source[]>("/sources"),
   search: (q: string, source?: string, kind?: string) => get<SearchHit[]>("/search", { q, source, kind, limit: 40 }),
