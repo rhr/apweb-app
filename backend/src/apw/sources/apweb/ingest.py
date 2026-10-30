@@ -363,7 +363,7 @@ def ingest(snapshot: str | None = None, con=None) -> dict:
     console.print(f"references: {n_refs} parsed, {skipped} skipped")
 
     # order pages
-    page_headers = {}
+    htmls = {}
     seen_sha = set()
     for rel in sorted(manifest):
         if not rel.startswith("orders/") or rel in NON_ORDER_PAGES:
@@ -371,8 +371,11 @@ def ingest(snapshot: str | None = None, con=None) -> dict:
         if manifest[rel]["sha256"] in seen_sha:     # e.g. Cycadales.html == cycadales.html
             continue
         seen_sha.add(manifest[rel]["sha256"])
-        page = rel.removeprefix("orders/")
-        page_headers[page] = pages.parse_page(page, crawl.decode((root / rel).read_bytes()))
+        htmls[rel.removeprefix("orders/")] = crawl.decode((root / rel).read_bytes())
+    # two passes: the second knows which names are families anywhere on the site
+    first = {p: pages.parse_page(p, h) for p, h in htmls.items()}
+    families = {norm(n) for hs in first.values() for h in hs if h.rank == "family" for n in h.names}
+    page_headers = {p: pages.parse_page(p, h, families) for p, h in htmls.items()}
     asm = Assembler(page_headers)
     console.print(f"pages: {len(page_headers)}, headers: "
                   f"{sum(map(len, page_headers.values()))}, nodes: {len(asm.nodes)}")

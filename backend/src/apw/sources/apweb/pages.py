@@ -445,7 +445,9 @@ def _anchor_header(p: Tag, text: str) -> Tag | None:
     return None
 
 
-def parse_page(page: str, html: str) -> list[Header]:
+def parse_page(page: str, html: str, families: set[str] | None = None) -> list[Header]:
+    """`families`: normalized names of all family headers on the site, if known; used to
+    tell clades of families from clades of tribes ('Saraceae' is a tribe, after Saraca)."""
     soup = BeautifulSoup(html, "lxml")
     headers: list[Header] = []
     cur: Header | None = None
@@ -471,8 +473,11 @@ def parse_page(page: str, html: str) -> list[Header]:
             if h:
                 headers.append(h)
                 cur, in_chars, first_para, main_topic = h, True, not h.characters, None
-                if h.rank in ("family", "order") or (h.informal and _above_family(h)) \
-                        or h.rank == "clade" and not h.informal:
+                # A family's own discussion follows its subgroups, so keep the family
+                # context through subgroups, including named clades within it ('The BOP
+                # Clade'). Only clades of families or higher (or backbone lines) end it.
+                if h.rank in ("family", "order") or (h.atoms and _above_family(h, families)) \
+                        or (h.rank == "clade" and not h.atoms and family is None):
                     family = h if h.rank == "family" else None
                 continue
         if cur is None:
@@ -518,10 +523,14 @@ def parse_page(page: str, html: str) -> list[Header]:
     return headers
 
 
-def _above_family(h: Header) -> bool:
+def _above_family(h: Header, families: set[str] | None = None) -> bool:
     """Informal clade whose members are families or higher (e.g. [Cornaceae [Nyssaceae ...]])."""
-    return any(infer_rank(a, False, False) in ("family", "order", "superorder", "clade")
-               for a in h.atoms)
+    def high(a: str) -> bool:
+        rank = infer_rank(a, False, False)
+        if rank == "family" and families is not None:
+            return norm(a) in families
+        return rank in ("family", "order", "superorder")
+    return any(high(a) for a in h.atoms)
 
 
 def _make_header(page: str, seq: int, p: Tag, a: Tag | None, text: str) -> Header | None:

@@ -72,8 +72,40 @@ apw stats                            # data-quality summary
 apw -s apg2 show Saxifragales        # any command against another source
 ```
 
-The same functions are available from Python in `apw.query`. The planned web API and
-LLM tools will call them too.
+The same functions are available from Python in `apw.query`; `apw.service` wraps them
+as JSON for the web API and the MCP server.
+
+## Web app
+
+```bash
+cd frontend && npm install && npm run build    # → frontend/dist
+cd ../backend && .venv/bin/apw serve           # http://127.0.0.1:8000 (API docs: /api/docs)
+```
+
+`apw serve` serves both the API and the built app. For frontend development, run
+`apw serve` and `npm run dev` in `frontend/` together; Vite proxies `/api` to port 8000.
+
+- **Taxon pages**: lineage, counts, distribution, synonymy, characterization (possible
+  apomorphies in bold), literature by topic (with DOIs), the same taxon across APWeb and
+  APG I–IV, and a note where APWeb's pages place the group differently.
+- **Phylogeny viewer**: a zoomable cladogram that loads children as you expand them.
+  "Named groups only" hides the bracketed informal clades. Click a name for a summary
+  panel; re-root anywhere.
+- **Compare**: family (or order) placements between any two sources, and which clades
+  of one have a counterpart with the same orders in the other.
+- **Conflicts**: groups that different APWeb pages place differently.
+- **Search**: name autocomplete, plus full-text search over statements and references.
+
+## MCP server (for AI clients)
+
+```bash
+claude mcp add apw -- /path/to/apweb-app/backend/.venv/bin/apw mcp
+```
+
+Tools: `list_sources`, `search`, `get_taxon`, `get_subtree`, `get_literature`,
+`find_references`, `get_reference`, `compare_classifications`, `clade_agreement`,
+`list_conflicts`. Each returns structured JSON with source keys and APWeb/DOI links, so
+answers can cite their sources.
 
 ## How the APWeb parse works
 
@@ -133,9 +165,8 @@ resolved against APWeb's bibliography using:
 
 ## Roadmap
 
-- **M2 — API and browser.** FastAPI over `apw.query`; React/TypeScript app with a
-  taxonomy browser, a D3 phylogeny viewer and an APG-version comparison view. The query
-  layer will also be exposed as an MCP server, so AI tools can query the store directly.
+- **M2 — API and browser** (done): FastAPI, a React/TypeScript app with a D3 tree
+  viewer and source comparison, and an MCP server.
 - **M3 — Natural-language queries.** Claude with tool use over the query layer, plus
   embeddings over claims and references for retrieval; answers cite claims and sources.
 - **M4+ — More sources and synthesis.**

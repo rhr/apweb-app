@@ -1,0 +1,1 @@
+{"root":["./src/api.ts","./src/lib.tsx","./src/main.tsx","./src/components/PhyloTree.tsx","./src/components/SearchBox.tsx","./src/pages/ComparePage.tsx","./src/pages/OtherPages.tsx","./src/pages/TaxonPage.tsx","./src/pages/TreePage.tsx","./vite.config.ts"],"version":"5.9.3"}

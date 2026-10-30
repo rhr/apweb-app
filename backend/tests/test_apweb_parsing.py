@@ -169,3 +169,22 @@ def test_assembler_merges_pages_and_picks_parents():
     assert parents["Fooideae"] == "Fooaceae"
     assert parents["Bazaceae"] == "Betales"
     assert "Rootophyta" in labels
+
+
+def test_family_discussion_after_subgroups_belongs_to_family():
+    # 'Saraceae' is a tribe (after Saraca) though it ends in -aceae; the clade of tribes
+    # must not end the family's context, so the closing Evolution paragraph is Fooaceae's.
+    html = """<html><body>
+<p><b><a name="Alphales" anc="X">ALPHALES</a></b> Author</p>
+<p><b><a name="Fooaceae" anc="Alphales">FOOACEAE</a></b> Smith</p>
+<p><a name="SarBaz" anc="Fooaceae"><u>[Saraceae + Bazeae]</u></a>: pods.</p>
+<p><a name="Saraceae" anc="SarBaz"><b>1A. Saraceae</b></a> Doe</p>
+<p style="text-indent: 30px;"><b>Age.</b> Young (Doe 2001).</p>
+<p><a name="Bazeae" anc="SarBaz"><b>1B. Bazeae</b></a> Doe</p>
+<p style="text-indent: 30px;"><b>Evolution:</b> <u>Divergence &amp; Distribution.</u> Old (Roe 2002).</p>
+</body></html>"""
+    hs = {h.label: h for h in pages.parse_page("a.htm", html, families={"fooaceae"})}
+    assert hs["Saraceae"].rank == "tribe"
+    assert list(hs["Saraceae"].topics) == ["Age"]
+    assert "Evolution/Divergence & Distribution" in hs["Fooaceae"].topics
+    assert not hs["Bazeae"].topics

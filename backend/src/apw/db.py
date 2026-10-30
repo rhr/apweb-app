@@ -46,6 +46,14 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     return con
 
 
+def connect_ro(path: Path | None = None) -> sqlite3.Connection:
+    """Read-only connection, safe to share across threads for serving queries."""
+    path = path or config.db_path()
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    return con
+
+
 def init(con: sqlite3.Connection) -> None:
     con.executescript(resources.files("apw").joinpath("schema.sql").read_text())
     con.executemany(

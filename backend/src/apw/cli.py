@@ -98,7 +98,7 @@ def show(name: str, source: Optional[str] = SourceOpt,
     """Summary of a taxon/clade: placement, stats, apomorphies, literature."""
     con = _con()
     c = _one(con, name, source)
-    tree = query.Tree(con, c["source_id"])
+    tree = query.tree_for(con, c["source_id"])
     console.print(f"[bold]{E(c['label'])}[/] {E(c['authorship'] or '')}  [dim]{c['rank']}"
                   f"{' (informal)' if c['informal'] else ''}[/]")
     if c["url"]:
@@ -153,7 +153,7 @@ def lineage(name: str, source: Optional[str] = SourceOpt):
     """Path from a taxon to the root."""
     con = _con()
     c = _one(con, name, source)
-    tree = query.Tree(con, c["source_id"])
+    tree = query.tree_for(con, c["source_id"])
     for i, x in enumerate(tree.lineage(c["id"])):
         r = tree.concepts[x]
         console.print(f"{E(r['label'])} [dim]{r['rank']}[/]")
@@ -165,7 +165,7 @@ def children(name: str, source: Optional[str] = SourceOpt,
     """Subtree below a taxon."""
     con = _con()
     c = _one(con, name, source)
-    tree = query.Tree(con, c["source_id"])
+    tree = query.tree_for(con, c["source_id"])
 
     def add(node, cid, d):
         for k in sorted(tree.children.get(cid, []), key=lambda k: tree.concepts[k]["label"]):
@@ -304,6 +304,22 @@ def stats():
                       f"missing from APWeb: {len(res['only_a'])}")
     except LookupError:
         pass
+
+
+# ---------------------------------------------------------------- servers
+
+@app.command()
+def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False):
+    """Run the HTTP API (and the built frontend, if present). Docs at /api/docs."""
+    import uvicorn
+    uvicorn.run("apw.api:app", host=host, port=port, reload=reload)
+
+
+@app.command()
+def mcp():
+    """Run the MCP server on stdio, for AI clients (e.g. `claude mcp add apw -- apw mcp`)."""
+    from .mcp_server import main
+    main()
 
 
 if __name__ == "__main__":

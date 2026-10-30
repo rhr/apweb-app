@@ -61,10 +61,10 @@ def get(con, concept_id: int) -> sqlite3.Row:
 
 
 class Tree:
-    """In-memory child_of graph for one source."""
+    """In-memory child_of graph for one source. Holds no connection, so it can be cached
+    and shared across requests."""
 
     def __init__(self, con, source_id: int):
-        self.con = con
         self.source_id = source_id
         self.parent: dict[int, int] = {}
         self.children: dict[int, list[int]] = defaultdict(list)
@@ -72,11 +72,22 @@ class Tree:
                              "AND predicate = 'child_of'", (source_id,)):
             self.parent[r[0]] = r[1]
             self.children[r[1]].append(r[0])
+        self.concepts: dict[int, dict] = {r["id"]: dict(r) for r in con.execute(
+            "SELECT * FROM concept WHERE source_id = ?", (source_id,))}
+        for kids in self.children.values():
+            kids.sort(key=lambda k: self.concepts[k]["label"].lower())
 
     @cached_property
-    def concepts(self) -> dict[int, sqlite3.Row]:
-        return {r["id"]: r for r in self.con.execute(
-            "SELECT * FROM concept WHERE source_id = ?", (self.source_id,))}
+    def n_descendants(self) -> dict[int, int]:
+        out: dict[int, int] = {}
+        order, stack = [], list(self.roots())
+        while stack:
+            x = stack.pop()
+            order.append(x)
+            stack.extend(self.children.get(x, []))
+        for x in reversed(order):
+            out[x] = sum(1 + out[c] for c in self.children.get(x, []))
+        return out
 
     def lineage(self, cid: int) -> list[int]:
         out, seen = [cid], {cid}
@@ -103,6 +114,21 @@ class Tree:
         return [c for c in self.concepts if c not in self.parent]
 
 
+_TREES: dict[tuple, Tree] = {}
+
+
+def tree_for(con, source_id: int) -> Tree:
+    """Cached Tree; the key changes whenever the source is re-ingested."""
+    stamp = tuple(con.execute("SELECT max(id), count(*) FROM claim WHERE source_id = ? "
+                              "AND predicate = 'child_of'", (source_id,)).fetchone())
+    key = (source_id, *stamp)
+    if key not in _TREES:
+        for k in [k for k in _TREES if k[0] == source_id]:
+            del _TREES[k]
+        _TREES[key] = Tree(con, source_id)
+    return _TREES[key]
+
+
 def claims(con, concept_id: int, predicate: str | None = None) -> list[dict]:
     q = "SELECT * FROM claim WHERE subject_id = ?" + (" AND predicate = ?" if predicate else "")
     rows = con.execute(q + " ORDER BY id", (concept_id, predicate) if predicate else (concept_id,))
@@ -120,15 +146,16 @@ def literal(con, concept_id: int, predicate: str) -> str | None:
     return r[0] if r else None
 
 
-def citations_for(con, concept_id: int, topic: str | None = None) -> list[sqlite3.Row]:
+def citations_for(con, concept_id: int, topic: str | None = None,
+                  exact: bool = False) -> list[sqlite3.Row]:
     """References cited where the source discusses this concept (optionally one topic)."""
     q = ("SELECT cl.value AS topic, ci.text, ci.confidence, ci.candidates, r.* FROM claim cl "
          "JOIN citation ci ON ci.claim_id = cl.id LEFT JOIN reference r ON r.id = ci.reference_id "
          "WHERE cl.subject_id = ? AND cl.predicate = 'discussed_in'")
     args: list = [concept_id]
     if topic:
-        q += " AND cl.value LIKE ?"
-        args.append(f"%{topic}%")
+        q += " AND cl.value = ?" if exact else " AND cl.value LIKE ?"
+        args.append(topic if exact else f"%{topic}%")
     return con.execute(q + " ORDER BY cl.value, r.cite_year", args).fetchall()
 
 
@@ -191,35 +218,37 @@ def search(con, q: str, kind: str | None = None, source: str | None = None,
 @dataclass
 class Placement:
     name: str
-    a: str | None
+    a: str | None               # parent (e.g. order) in source a, or how a treats the name
     b: str | None
+    a_id: int | None = None     # the taxon's concept in each source
+    b_id: int | None = None
 
 
 def compare_placements(con, a: str, b: str, rank: str = "family",
                        parent_rank: str = "order") -> dict[str, list[Placement]]:
     """Compare where each `rank` taxon sits (its `parent_rank` ancestor) in two sources."""
     sa, sb = resolve_source(con, a), resolve_source(con, b)
-    ta, tb = Tree(con, sa["id"]), Tree(con, sb["id"])
+    ta, tb = tree_for(con, sa["id"]), tree_for(con, sb["id"])
 
-    def placements(t: Tree) -> dict[str, tuple[str, str | None]]:
+    def placements(t: Tree) -> dict[str, tuple[str, str | None, int]]:
         out = {}
         for cid, c in t.concepts.items():
             if c["rank"] == rank:
                 anc = t.ancestor_at_rank(cid, parent_rank)
-                out[c["norm"]] = (c["label"], t.concepts[anc]["label"] if anc else None)
+                out[c["norm"]] = (c["label"], t.concepts[anc]["label"] if anc else None, cid)
         return out
 
-    def treated_as(t: Tree, n: str) -> str | None:
-        """'Frankenieae (tribe, Tamaricaceae)' when n is a synonym/label of another concept."""
+    def treated_as(t: Tree, n: str) -> tuple[str | None, int | None]:
+        """('= Frankenieae (tribe, in Tamaricaceae)', id) when n labels another concept."""
         r = con.execute("SELECT c.id FROM concept c JOIN concept_label l ON l.concept_id = c.id "
                         "WHERE c.source_id = ? AND l.norm = ? AND l.kind != 'anchor' LIMIT 1",
                         (t.source_id, n)).fetchone()
         if not r:
-            return None
+            return None, None
         c = t.concepts[r["id"]]
         fam = t.ancestor_at_rank(c["id"], "family") if c["rank"] != "family" else None
         where = t.concepts[fam]["label"] if fam else None
-        return f"= {c['label']} ({c['rank']}{', in ' + where if where else ''})"
+        return f"= {c['label']} ({c['rank']}{', in ' + where if where else ''})", c["id"]
 
     pa, pb = placements(ta), placements(tb)
     result: dict[str, list[Placement]] = {"moved": [], "only_a": [], "only_b": [], "same": []}
@@ -227,11 +256,13 @@ def compare_placements(con, a: str, b: str, rank: str = "family",
         if n in pa and n in pb:
             la, lb = pa[n][1], pb[n][1]
             key = "same" if norm(la or "") == norm(lb or "") else "moved"
-            result[key].append(Placement(pa[n][0], la, lb))
+            result[key].append(Placement(pa[n][0], la, lb, pa[n][2], pb[n][2]))
         elif n in pa:
-            result["only_a"].append(Placement(pa[n][0], pa[n][1], treated_as(tb, n)))
+            how, bid = treated_as(tb, n)
+            result["only_a"].append(Placement(pa[n][0], pa[n][1], how, pa[n][2], bid))
         else:
-            result["only_b"].append(Placement(pb[n][0], treated_as(ta, n), pb[n][1]))
+            how, aid = treated_as(ta, n)
+            result["only_b"].append(Placement(pb[n][0], how, pb[n][1], aid, pb[n][2]))
     return result
 
 

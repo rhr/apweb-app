@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apw"
-version = "0.1.0"
+version = "0.2.0"
 description = "Knowledge store for angiosperm phylogeny, with provenance and literature links"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,6 +13,9 @@ dependencies = [
     "lxml>=5",
     "typer>=0.12",
     "rich>=13",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "mcp>=2.3,<3",
 ]
 
 [project.optional-dependencies]
