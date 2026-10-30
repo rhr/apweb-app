@@ -1,6 +1,7 @@
 """The question-answering loop, against a scripted stand-in for the Anthropic client."""
 
 import asyncio
+import json
 from types import SimpleNamespace as NS
 
 import anthropic
@@ -58,9 +59,13 @@ def msg(*blocks, stop="end_turn"):
               usage=NS(input_tokens=10, output_tokens=5, cache_read_input_tokens=0))
 
 
-def run(question, cid=None):
+KEY = "sk-ant-api03-" + "a" * 40
+OTHER_KEY = "sk-ant-api03-" + "b" * 40
+
+
+def run(question, cid=None, key=KEY, model=None):
     async def go():
-        return [e async for e in ask.ask(question, cid)]
+        return [e async for e in ask.ask(question, cid, key, model)]
     return asyncio.run(go())
 
 
@@ -68,7 +73,14 @@ def run(question, cid=None):
 def fake(monkeypatch):
     def install(*messages):
         c = FakeClient(*messages)
-        monkeypatch.setattr(ask, "_client", c)
+        c.used_keys = []
+
+        def user_client(api_key):
+            c.used_keys.append(api_key)
+            c.close = lambda: asyncio.sleep(0)
+            return c
+        monkeypatch.setattr(ask, "user_client", user_client)
+        monkeypatch.setattr(ask, "_server_client", c)
         monkeypatch.setattr(ask.tools, "get_taxon",
                             lambda name, source=None, max_characters=40: {"id": 7, "label": name,
                                                                           "rank": "family", "source": "apweb"})
@@ -147,10 +159,74 @@ def test_auth_error_is_reported(fake):
 def test_ask_endpoint_streams_sse(fake):
     from fastapi.testclient import TestClient
     from apw.api import app
-    fake(msg(Block(type="text", text="Hello")))
-    with TestClient(app).stream("POST", "/api/ask", json={"question": "hi"}) as r:
+    c = fake(msg(Block(type="text", text="Hello")))
+    with TestClient(app).stream("POST", "/api/ask", json={"question": "hi"},
+                                headers={"X-Anthropic-Api-Key": KEY}) as r:
         assert r.headers["content-type"].startswith("text/event-stream")
         lines = [l for l in r.iter_lines() if l.startswith("data: ")]
     import json
     events = [json.loads(l[6:]) for l in lines]
     assert [e["type"] for e in events] == ["conversation", "text", "done"]
+    assert c.used_keys == [KEY]
+
+
+# ------------------------------------------------------------------ bring-your-own-key
+
+
+def test_user_mode_requires_a_valid_key(fake, monkeypatch):
+    monkeypatch.setattr(ask, "MODE", "user")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-server-key-should-never-be-used")
+    c = fake(msg(Block(type="text", text="x")))
+    for key, words in ((None, "Enter your Anthropic API key"), ("hunter2", "doesn't look like")):
+        events = run("q", key=key)
+        assert events[-1]["type"] == "error" and events[-1]["auth"] and words in events[-1]["text"]
+    assert c.requests == []                     # nothing reached the model
+
+
+def test_server_mode_ignores_personal_keys(fake, monkeypatch):
+    monkeypatch.setattr(ask, "MODE", "server")
+    fake()
+    events = run("q", key=KEY)
+    assert events[-1]["type"] == "error" and "personal API keys" in events[-1]["text"]
+
+
+def test_both_mode_falls_back_to_server_credentials(fake, monkeypatch):
+    monkeypatch.setattr(ask, "MODE", "both")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server")
+    c = fake(msg(Block(type="text", text="ok")))
+    events = run("q", key=None)
+    assert events[-1]["type"] == "done" and c.used_keys == []
+
+
+def test_conversation_is_bound_to_its_key_and_model(fake):
+    c = fake(msg(Block(type="text", text="one")), msg(Block(type="text", text="two")),
+             msg(Block(type="text", text="three")))
+    first = run("q1", model="claude-sonnet-5-5")
+    assert first[0]["model"] == "claude-sonnet-5-5"
+    cid = first[0]["id"]
+    same = run("q2", cid, KEY)                  # same key: continues, keeps its model
+    assert same[0]["id"] == cid and len(c.requests[1]["messages"]) == 3
+    assert c.requests[1]["model"] == "claude-sonnet-5-5"
+    other = run("q3", cid, OTHER_KEY)           # another key can't read or extend it
+    assert other[0]["id"] != cid and len(c.requests[2]["messages"]) == 1
+    conv = ask._conversations[cid]
+    assert KEY not in json.dumps(conv.messages) and KEY not in conv.owner
+
+
+def test_key_is_scrubbed_from_errors(fake):
+    fake(RuntimeError(f"boom with {KEY} inside"))
+    events = run("q")
+    assert events[-1]["type"] == "error" and KEY not in events[-1]["text"] and "[key]" in events[-1]["text"]
+
+
+def test_unknown_model_rejected(fake):
+    fake()
+    assert run("q", model="gpt-4")[-1]["text"].startswith("Unknown model")
+
+
+def test_explicit_key_ignores_server_environment(monkeypatch):
+    # the SDK must not mix the server's token into a visitor's client
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "server-token")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server-key")
+    client = ask.user_client(KEY)
+    assert client.api_key == KEY and client.auth_token is None

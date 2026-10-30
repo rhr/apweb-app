@@ -3,6 +3,7 @@ import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, askStream, type AskEvent } from "../api";
+import { ApiKeyPanel, loadKey } from "../components/ApiKeyPanel";
 import { useAsync } from "../lib";
 
 interface Activity {
@@ -29,6 +30,11 @@ const EXAMPLES = [
   "Where does APWeb depart from APG IV in the placement of families?",
   "Which parts of the tree do APWeb's own pages disagree about?",
 ];
+
+const MODEL_LABELS: Record<string, string> = {
+  "claude-opus-5-5": "Opus 5.5 · best",
+  "claude-sonnet-5-5": "Sonnet 5.5 · ½ cost",
+};
 
 const VERBS: Record<string, string> = {
   get_taxon: "Looked up",
@@ -83,8 +89,14 @@ export function AskPage() {
   const [conversation, setConversation] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [apiKey, setApiKey] = useState<string | null>(loadKey());
+  const [keyProblem, setKeyProblem] = useState<string | null>(null);
+  const [model, setModel] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+
+  const st = status.data;
+  const canAsk = !!st?.enabled && (!!apiKey || !!st?.server_key);
 
   const update = (fn: (t: Turn) => Turn) =>
     setTurns((ts) => [...ts.slice(0, -1), fn(ts[ts.length - 1])]);
@@ -98,10 +110,11 @@ export function AskPage() {
     const ctrl = new AbortController();
     abort.current = ctrl;
     try {
-      await askStream(question, conversation, ctrl.signal, (e: AskEvent) => {
+      await askStream(question, { conversationId: conversation, apiKey, model }, ctrl.signal, (e: AskEvent) => {
         switch (e.type) {
           case "conversation":
             setConversation(e.id);
+            setModel(e.model);
             break;
           case "text":
             update((t) => ({ ...t, answer: t.answer + e.text }));
@@ -123,6 +136,7 @@ export function AskPage() {
             break;
           case "error":
             update((t) => ({ ...t, error: e.text, done: true }));
+            if (e.auth) setKeyProblem(e.text);
             break;
         }
       });
@@ -138,18 +152,18 @@ export function AskPage() {
   // ?q=… (from the home page) asks immediately
   useEffect(() => {
     const q = params.get("q");
-    if (q && status.data?.enabled && !turns.length) {
+    if (q && canAsk && !turns.length) {
       setParams({}, { replace: true });
       submit(q);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status.data]);
+  }, [status.data, apiKey]);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns.length, busy]);
 
-  const enabled = status.data?.enabled;
+  const enabled = canAsk;
 
   return (
     <div className="ask">
@@ -161,16 +175,35 @@ export function AskPage() {
             onClick={() => {
               setTurns([]);
               setConversation(null);
+              setModel(null);
             }}
           >
             New conversation
           </button>
         )}
       </div>
-      {status.data && !enabled && (
+      {st && !st.enabled && (
         <div className="note">
-          Question answering isn't configured on this server. It needs an Anthropic API key in the server's
-          environment (<code>ANTHROPIC_API_KEY</code>); everything else in the explorer works without it.
+          Question answering is turned off on this server; everything else in the explorer works without it.
+        </div>
+      )}
+      {st?.enabled && st.accepts_user_key && (
+        <ApiKeyPanel
+          apiKey={apiKey}
+          optional={st.server_key}
+          problem={keyProblem}
+          onChange={(k) => {
+            setApiKey(k);
+            setKeyProblem(null);
+            // a conversation belongs to the key that started it
+            setConversation(null);
+            setTurns([]);
+          }}
+        />
+      )}
+      {st?.enabled && !st.accepts_user_key && !st.server_key && (
+        <div className="note">
+          Question answering needs an Anthropic API key in the server's environment (<code>ANTHROPIC_API_KEY</code>).
         </div>
       )}
       {turns.length === 0 && (
@@ -240,6 +273,21 @@ export function AskPage() {
             }
           }}
         />
+        {st && st.models.length > 1 && (
+          <select
+            aria-label="Model"
+            title={conversation ? "Start a new conversation to change the model" : "Model"}
+            value={model ?? st.model}
+            disabled={!!conversation || busy}
+            onChange={(e) => setModel(e.target.value)}
+          >
+            {st.models.map((m) => (
+              <option key={m} value={m}>
+                {MODEL_LABELS[m] ?? m}
+              </option>
+            ))}
+          </select>
+        )}
         {busy ? (
           <button type="button" className="button secondary" onClick={() => abort.current?.abort()}>
             Stop

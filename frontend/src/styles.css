@@ -784,3 +784,54 @@ ol.refs li {
   font-size: 1rem;
   padding: 0.5em 0.7em;
 }
+
+.key-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  margin: 0.8rem 0 1rem;
+}
+.key-panel.compact {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+.key-panel code {
+  font-size: 0.85em;
+}
+.key-row {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.4rem 0;
+  flex-wrap: wrap;
+}
+.key-row input {
+  flex: 1;
+  min-width: 220px;
+  font: inherit;
+  padding: 0.35em 0.6em;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.key-notes {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1em;
+}
+.key-notes li {
+  margin: 0.2em 0;
+}
+.ask-form select {
+  max-width: 15rem;
+}
+@media (max-width: 640px) {
+  .ask-form {
+    flex-wrap: wrap;
+  }
+  .ask-form select {
+    max-width: none;
+    flex: 1;
+  }
+}

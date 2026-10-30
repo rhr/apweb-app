@@ -11,14 +11,26 @@
 
 Conversations live in process memory (they hold opaque thinking blocks that must be
 sent back unchanged), so a restart forgets them.
+
+Credentials (APW_ASK_MODE):
+    user    (default) each visitor supplies their own Anthropic API key with each request;
+            the server's own credentials are never used. Safe for public deployment.
+    server  only the server's credentials (ANTHROPIC_API_KEY / `ant auth login`).
+    both    a visitor's key if given, else the server's.
+A visitor's key is used for that request only: it is never stored, logged, or put in a
+conversation; conversations remember only a keyed hash, so another key can't continue them.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import inspect
 import json
 import os
+import re
+import secrets
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -31,7 +43,13 @@ import pydantic
 from . import tools
 
 MODEL = os.environ.get("APW_MODEL", "claude-opus-5-5")
+MODELS = [m.strip() for m in os.environ.get("APW_ASK_MODELS", f"{MODEL},claude-sonnet-5-5").split(",")
+          if m.strip()]
 EFFORT = os.environ.get("APW_EFFORT", "medium")
+MODE = os.environ.get("APW_ASK_MODE", "user")         # user | server | both
+KEY_HEADER = "X-Anthropic-Api-Key"
+_KEY_RE = re.compile(r"^sk-ant-[A-Za-z0-9_\-]{20,200}$")
+_SECRET = secrets.token_bytes(32)                     # per-process salt for key fingerprints
 MAX_ROUNDS = 12            # model calls per question
 MAX_QUESTION_CHARS = 4000
 MAX_CONVERSATIONS = 200
@@ -139,6 +157,8 @@ def summarize(name: str, result: Any) -> str:
 @dataclass
 class Conversation:
     id: str
+    owner: str                                  # fingerprint of the credentials that started it
+    model: str
     messages: list[dict] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -146,11 +166,13 @@ class Conversation:
 _conversations: "OrderedDict[str, Conversation]" = OrderedDict()
 
 
-def _conversation(cid: str | None) -> Conversation:
-    if cid and cid in _conversations:
+def _conversation(cid: str | None, owner: str, model: str) -> Conversation:
+    """Continue a conversation only for the credentials that started it."""
+    conv = _conversations.get(cid) if cid else None
+    if conv is not None and hmac.compare_digest(conv.owner, owner):
         _conversations.move_to_end(cid)
-        return _conversations[cid]
-    conv = Conversation(uuid.uuid4().hex)
+        return conv
+    conv = Conversation(uuid.uuid4().hex, owner, model)
     _conversations[conv.id] = conv
     while len(_conversations) > MAX_CONVERSATIONS:
         _conversations.popitem(last=False)
@@ -173,36 +195,90 @@ def echo_content(content: list) -> list[dict]:
     return out
 
 
-_client: anthropic.AsyncAnthropic | None = None
+_server_client: anthropic.AsyncAnthropic | None = None
 
 
-def client() -> anthropic.AsyncAnthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.AsyncAnthropic()
-    return _client
+def server_client() -> anthropic.AsyncAnthropic:
+    global _server_client
+    if _server_client is None:
+        _server_client = anthropic.AsyncAnthropic()
+    return _server_client
+
+
+def user_client(api_key: str) -> anthropic.AsyncAnthropic:
+    # An explicit api_key stops the SDK from consulting env vars or profiles, so the
+    # server's own credentials can't leak into a visitor's requests.
+    return anthropic.AsyncAnthropic(api_key=api_key)
+
+
+def fingerprint(api_key: str | None) -> str:
+    if api_key is None:
+        return "server"
+    return hmac.new(_SECRET, api_key.encode(), hashlib.sha256).hexdigest()
+
+
+def valid_key(api_key: str) -> bool:
+    return bool(_KEY_RE.match(api_key))
+
+
+def server_configured() -> bool:
+    """Whether server credentials look configured: an API key/token, or an `ant` profile."""
+    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+                or os.environ.get("ANTHROPIC_PROFILE")
+                or (Path.home() / ".config" / "anthropic").is_dir())
 
 
 def status() -> dict:
-    """Whether credentials look configured: an API key/token, or an `ant auth login` profile."""
-    configured = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
-                      or os.environ.get("ANTHROPIC_PROFILE")
-                      or (Path.home() / ".config" / "anthropic").is_dir())
-    return {"enabled": configured and os.environ.get("APW_ASK_DISABLED") != "1", "model": MODEL}
+    server = MODE in ("server", "both") and server_configured()
+    return {"enabled": os.environ.get("APW_ASK_DISABLED") != "1" and (server or MODE != "server"),
+            "mode": MODE, "server_key": server, "accepts_user_key": MODE in ("user", "both"),
+            "models": MODELS, "model": MODELS[0]}
 
 
 # ------------------------------------------------------------------ the loop
 
-async def ask(question: str, conversation_id: str | None = None) -> AsyncIterator[dict]:
+async def ask(question: str, conversation_id: str | None = None, api_key: str | None = None,
+              model: str | None = None) -> AsyncIterator[dict]:
+    """Answer a question; with `api_key` the request runs on the visitor's key."""
+    api_key = (api_key or "").strip() or None
+    if api_key is not None:
+        if MODE == "server":
+            yield {"type": "error", "auth": True,
+                   "text": "This server answers with its own key; personal API keys aren't used."}
+            return
+        if not valid_key(api_key):
+            yield {"type": "error", "auth": True,
+                   "text": "That doesn't look like an Anthropic API key (they start with sk-ant-)."}
+            return
+    elif MODE == "user" or not server_configured():
+        yield {"type": "error", "auth": True, "text": "Enter your Anthropic API key to ask questions."}
+        return
+    if model is not None and model not in MODELS:
+        yield {"type": "error", "text": f"Unknown model {model!r}."}
+        return
+
     question = question.strip()[:MAX_QUESTION_CHARS]
-    conv = _conversation(conversation_id)
-    yield {"type": "conversation", "id": conv.id}
+    conv = _conversation(conversation_id, fingerprint(api_key), model or MODELS[0])
+    yield {"type": "conversation", "id": conv.id, "model": conv.model}
     if not question:
         yield {"type": "error", "text": "Empty question."}
         return
     if conv.lock.locked():
         yield {"type": "error", "text": "This conversation is still answering a question."}
         return
+    client = user_client(api_key) if api_key else server_client()
+    try:
+        async for event in _answer(conv, question, client):
+            if event["type"] == "error" and api_key:
+                event["text"] = event["text"].replace(api_key, "[key]")
+            yield event
+    finally:
+        if api_key:
+            await client.close()
+
+
+async def _answer(conv: Conversation, question: str,
+                  client: anthropic.AsyncAnthropic) -> AsyncIterator[dict]:
 
     async with conv.lock:
         start = len(conv.messages)            # roll back to here if the turn fails
@@ -212,8 +288,8 @@ async def ask(question: str, conversation_id: str | None = None) -> AsyncIterato
         try:
             for _ in range(MAX_ROUNDS):
                 try:
-                    async with client().beta.messages.stream(
-                        model=MODEL,
+                    async with client.beta.messages.stream(
+                        model=conv.model,
                         max_tokens=64000,
                         system=SYSTEM,
                         tools=TOOL_DEFS,
@@ -274,8 +350,10 @@ async def ask(question: str, conversation_id: str | None = None) -> AsyncIterato
             yield {"type": "error", "text": f"Stopped after {MAX_ROUNDS} steps without an answer."}
         except anthropic.AuthenticationError:
             del conv.messages[start:]
-            yield {"type": "error", "text": "The question service isn't configured with a valid "
-                                            "Anthropic API key (ANTHROPIC_API_KEY)."}
+            yield {"type": "error", "auth": True, "text": "The Anthropic API rejected the API key."}
+        except anthropic.PermissionDeniedError as e:
+            del conv.messages[start:]
+            yield {"type": "error", "auth": True, "text": f"The API key isn't permitted to do this: {e.message}"}
         except anthropic.RateLimitError:
             del conv.messages[start:]
             yield {"type": "error", "text": "Rate limited by the model API; try again shortly."}

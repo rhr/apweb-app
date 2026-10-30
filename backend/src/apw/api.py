@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -114,6 +114,7 @@ def conflicts(source: str | None = SourceQ, limit: int = Query(200, le=1000)):
 class Question(BaseModel):
     question: str
     conversation_id: str | None = None
+    model: str | None = None
 
 
 @app.get("/api/ask/status")
@@ -123,13 +124,17 @@ def ask_status():
 
 
 @app.post("/api/ask")
-async def ask_question(q: Question):
+async def ask_question(q: Question,
+                       api_key: str | None = Header(None, alias="X-Anthropic-Api-Key",
+                                                    include_in_schema=False)):
     """Answer a question with Claude and the store's tools, streamed as Server-Sent Events
-    (one JSON object per `data:` line; see apw.ask for the event types)."""
+    (one JSON object per `data:` line; see apw.ask for the event types). Send the
+    visitor's Anthropic API key in the X-Anthropic-Api-Key header; it is used for this
+    request only and never stored."""
     from . import ask
 
     async def events():
-        async for e in ask.ask(q.question, q.conversation_id):
+        async for e in ask.ask(q.question, q.conversation_id, api_key, q.model):
             yield f"data: {json.dumps(e, ensure_ascii=False, default=str)}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream",

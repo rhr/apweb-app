@@ -187,25 +187,36 @@ async function get<T>(path: string, params: Record<string, string | number | boo
 }
 
 export type AskEvent =
-  | { type: "conversation"; id: string }
+  | { type: "conversation"; id: string; model: string }
   | { type: "text"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; id: string; summary: string; is_error: boolean }
   | { type: "notice"; text: string }
   | { type: "done"; usage: Record<string, number>; model: string }
-  | { type: "error"; text: string };
+  | { type: "error"; text: string; auth?: boolean };
+
+export interface AskStatus {
+  enabled: boolean;
+  mode: "user" | "server" | "both";
+  server_key: boolean;
+  accepts_user_key: boolean;
+  models: string[];
+  model: string;
+}
 
 /** POST a question and feed each server-sent event to `onEvent` until the stream ends. */
 export async function askStream(
   question: string,
-  conversationId: string | null,
+  opts: { conversationId: string | null; apiKey: string | null; model: string | null },
   signal: AbortSignal,
   onEvent: (e: AskEvent) => void,
 ): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.apiKey) headers["X-Anthropic-Api-Key"] = opts.apiKey; // used for this request only
   const r = await fetch("/api/ask", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, conversation_id: conversationId }),
+    headers,
+    body: JSON.stringify({ question, conversation_id: opts.conversationId, model: opts.model }),
     signal,
   });
   if (!r.ok || !r.body) throw new ApiError(r.status, r.statusText);
@@ -227,7 +238,7 @@ export async function askStream(
 }
 
 export const api = {
-  askStatus: () => get<{ enabled: boolean; model: string }>("/ask/status"),
+  askStatus: () => get<AskStatus>("/ask/status"),
   overview: () => get<Overview>("/overview"),
   sources: () => get<Source[]>("/sources"),
   search: (q: string, source?: string, kind?: string) => get<SearchHit[]>("/search", { q, source, kind, limit: 40 }),

@@ -79,6 +79,7 @@ as JSON for the web API and the MCP server.
 
 ```bash
 cd frontend && npm install && npm run build    # → frontend/dist
+export ANTHROPIC_API_KEY=...        # or: ant auth login
 cd ../backend && .venv/bin/apw serve           # http://127.0.0.1:8000 (API docs: /api/docs)
 ```
 
@@ -103,10 +104,29 @@ questions. Claude queries the store with the same tools the MCP server exposes, 
 writes an answer that links every taxon and reference it used. The page shows each
 lookup as it happens.
 
+**Who pays.** `APW_ASK_MODE` decides whose Anthropic credentials are used:
+
+| mode | behavior | use for |
+|---|---|---|
+| `user` (default) | each visitor enters their own API key on the Ask page; the server's credentials are never used | public deployment |
+| `server` | the server's `ANTHROPIC_API_KEY` (or `ant auth login` profile) | a private or lab-only deployment |
+| `both` | a visitor's key if they give one, otherwise the server's | trusted users plus optional BYOK |
+
 ```bash
-export ANTHROPIC_API_KEY=...       # or `ant auth login`; required for /ask only
-apw serve
+apw serve                                              # public: visitors bring their own keys
+APW_ASK_MODE=server ANTHROPIC_API_KEY=... apw serve    # private: the server pays
 ```
+
+**Visitor keys:**
+- The browser keeps the key for the tab (`sessionStorage`), or on the device if the
+  visitor opts in.
+- It is sent in an `X-Anthropic-Api-Key` header with each question and used for that
+  request only. The server never stores or logs it, and scrubs it from any error text.
+- Each conversation is bound to a keyed hash of the key that started it, so a different
+  key can't continue it.
+- Visitors can choose Opus 5.5 or Sonnet 5.5 (about half the cost), configurable with
+  `APW_ASK_MODELS`.
+- Serve over HTTPS.
 
 - Code: `backend/src/apw/ask.py` (streaming tool-use loop), `apw/tools.py` (tool
   definitions shared with the MCP server), `POST /api/ask` (Server-Sent Events).
@@ -115,9 +135,9 @@ apw serve
   (`fallbacks: "default"`).
 - Conversations are kept in server memory (follow-up questions work) and are lost on
   restart. `APW_ASK_DISABLED=1` turns the feature off.
-- **Cost:** each question is several model calls, billed to the server's key. There is
-  no per-user rate limiting yet, so put authentication or a quota in front of it before
-  exposing it publicly.
+- **Cost:** each question is several model calls. In `server` or `both` mode these are
+  billed to the server's key, and there is no per-user rate limiting, so keep those modes
+  behind authentication.
 
 ## MCP server (for AI clients)
 
