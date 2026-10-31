@@ -835,3 +835,18 @@ ol.refs li {
     flex: 1;
   }
 }
+
+/* OneZoom viewer (prototype) */
+.oz-frame {
+  width: 100%;
+  height: calc(100vh - 190px);
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.oz-fly {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+}

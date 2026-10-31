@@ -3,8 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { api, type Concept } from "../api";
 import { RankBadge, shortLabel, useSources } from "../lib";
 
-/** Name autocomplete within the current source; Enter without a pick runs a full search. */
-export function SearchBox() {
+/** Name autocomplete within the current source; Enter without a pick runs a full search.
+ * With `onPick`, picking a name calls it instead of opening the taxon page, and Enter
+ * picks the first suggestion. */
+export function SearchBox({ onPick, placeholder }: { onPick?: (c: Concept) => void; placeholder?: string } = {}) {
   const { current } = useSources();
   const [q, setQ] = useState("");
   const [items, setItems] = useState<Concept[]>([]);
@@ -38,14 +40,15 @@ export function SearchBox() {
   const go = (c: Concept) => {
     setOpen(false);
     setQ("");
-    nav(`/taxon/${c.id}`);
+    if (onPick) onPick(c);
+    else nav(`/taxon/${c.id}`);
   };
 
   return (
     <div className="searchbox" ref={box}>
       <input
         type="search"
-        placeholder="Search taxa, characters, literature…"
+        placeholder={placeholder ?? "Search taxa, characters, literature…"}
         aria-label="Search"
         value={q}
         onChange={(e) => {
@@ -62,6 +65,7 @@ export function SearchBox() {
             setActive((a) => Math.max(a - 1, -1));
           } else if (e.key === "Enter") {
             if (active >= 0 && items[active]) go(items[active]);
+            else if (onPick && items[0]) go(items[0]);
             else if (q.trim()) {
               setOpen(false);
               nav(`/search?q=${encodeURIComponent(q.trim())}`);
@@ -88,7 +92,7 @@ export function SearchBox() {
               {c.n_descendants ? <span className="muted small">{c.n_descendants.toLocaleString()} below</span> : null}
             </li>
           ))}
-          <li
+          {!onPick && <li
             className="suggest-all"
             onMouseDown={(e) => {
               e.preventDefault();
@@ -97,7 +101,7 @@ export function SearchBox() {
             }}
           >
             Search everything for “{q.trim()}” ↵
-          </li>
+          </li>}
         </ul>
       )}
     </div>

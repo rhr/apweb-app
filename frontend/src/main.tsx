@@ -5,6 +5,7 @@ import { SearchBox } from "./components/SearchBox";
 import { SourceProvider, sourceLabel, useSources } from "./lib";
 import { AskPage } from "./pages/AskPage";
 import { ComparePage } from "./pages/ComparePage";
+import { OneZoomPage } from "./pages/OneZoomPage";
 import { ConflictsPage, HomePage, NotFoundPage, ReferencePage, SearchPage, TaxonByName } from "./pages/OtherPages";
 import { TaxonPage } from "./pages/TaxonPage";
 import { TreePage } from "./pages/TreePage";
@@ -41,6 +42,7 @@ function App() {
         <nav className="mainnav">
           <NavLink to="/ask">Ask</NavLink>
           <NavLink to="/tree">Tree</NavLink>
+          <NavLink to="/onezoom">OneZoom</NavLink>
           <NavLink to="/compare">Compare</NavLink>
           <NavLink to="/conflicts">Conflicts</NavLink>
         </nav>
@@ -54,6 +56,7 @@ function App() {
           <Route path="/taxon/:id" element={<TaxonPage />} />
           <Route path="/tree" element={<TreePage />} />
           <Route path="/tree/:id" element={<TreePage />} />
+          <Route path="/onezoom" element={<OneZoomPage />} />
           <Route path="/ask" element={<AskPage />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/conflicts" element={<ConflictsPage />} />

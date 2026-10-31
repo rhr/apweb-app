@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Iterator, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, db, service
+from . import config, db, onezoom, service
 
 app = FastAPI(title="Angiosperm phylogeny knowledge store", version="0.2.0",
               docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -109,6 +109,53 @@ def clades(a: str, b: str):
 def conflicts(source: str | None = SourceQ, limit: int = Query(200, le=1000)):
     with _con() as con:
         return service.conflicts(con, source, limit)
+
+
+# OneZoom viewer data (prototype; see apw.onezoom). `source` as for SourceQ.
+
+def _ids(s: str) -> list[int]:
+    try:
+        return [int(x) for x in s.split(",") if x]
+    except ValueError:
+        raise HTTPException(400, "ids must be comma-separated integers")
+
+
+@app.get("/api/oz/{source}/completetree.js", include_in_schema=False)
+def oz_completetree(source: str):
+    with _con() as con:
+        return Response(onezoom.completetree_js(onezoom.tree_for(con, source)),
+                        media_type="text/javascript")
+
+
+@app.get("/api/oz/{source}/cut_position_map.js", include_in_schema=False)
+def oz_cut_position_map(source: str):
+    with _con() as con:
+        return Response(onezoom.cut_position_map_js(onezoom.tree_for(con, source)),
+                        media_type="text/javascript")
+
+
+@app.get("/api/oz/{source}/dates.js", include_in_schema=False)
+def oz_dates(source: str):
+    """Node ages; none yet."""
+    return Response("var tree_date = {};", media_type="text/javascript")
+
+
+@app.get("/api/oz/{source}/node_details")
+def oz_node_details(source: str, node_ids: str = "", leaf_ids: str = ""):
+    """Names and species counts for OneZoom node ids, in OneZoom's node_details format."""
+    with _con() as con:
+        return onezoom.node_details(con, onezoom.tree_for(con, source), _ids(node_ids),
+                                    _ids(leaf_ids))
+
+
+@app.get("/api/oz/{source}/locate/{concept_id}")
+def oz_locate(source: str, concept_id: int):
+    """The OneZoom id at which a concept is drawn (negative for tips)."""
+    with _con() as con:
+        oz = onezoom.tree_for(con, source)
+        if concept_id not in oz.ozid:
+            raise HTTPException(404, f"concept {concept_id} is not in this tree")
+        return {"ozid": oz.ozid[concept_id]}
 
 
 class Question(BaseModel):

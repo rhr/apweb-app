@@ -97,6 +97,31 @@ cd ../backend && .venv/bin/apw serve           # http://127.0.0.1:8000 (API docs
 - **Conflicts**: groups that different APWeb pages place differently.
 - **Search**: name autocomplete, plus full-text search over statements and references.
 
+### OneZoom viewer (prototype)
+
+The **OneZoom** page draws the current source with [OneZoom](https://www.onezoom.org)'s
+zoomable tree viewer, fed from this store:
+
+```bash
+frontend/scripts/fetch-onezoom.sh    # OneZoom's viewer bundle + UI strings → frontend/public/oz-viewer/vendor/
+cd frontend && npm run build
+```
+
+- `apw/onezoom.py` turns a source's `child_of` tree into OneZoom's formats: a
+  brackets-only Newick string (`/api/oz/<source>/completetree.js`, plus its cut map)
+  and a `node_details` endpoint for names and species counts. The concept id stands
+  in for OneZoom's Open Tree id.
+- `frontend/public/oz-viewer/` runs the viewer in an iframe, because OneZoom keeps its
+  state in globals. The React page talks to it with postMessage: fly to a taxon, switch
+  view, and select a clicked name.
+- Limits: groups that are their parent's only child are drawn as one node
+  ("Vitales / Vitaceae"); no images, common names, IUCN status or dates.
+- **Licence.** The viewer is © OneZoom CIO under the
+  [OneZoom Non-Profit Source-Available Licence](https://github.com/OneZoom/OZtree/blob/main/license.txt):
+  non-commercial use for science and education only, no sponsorable trees, and changes
+  made public must go back to OneZoom. It is not committed here. Talk to OneZoom
+  (mail@onezoom.org) before any public deployment.
+
 ## Asking questions (Claude)
 
 The **Ask** page, plus the question box on the home page, answers natural-language

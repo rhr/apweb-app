@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OneZoom viewer</title>
+    <!--
+      The OneZoom tree viewer, fed from this app's API (prototype).
+      vendor/OZentry.js is OneZoom's viewer, © OneZoom CIO, under the OneZoom Non-Profit
+      Source-Available Licence v1 (https://github.com/OneZoom/OZtree/blob/main/license.txt).
+      It is not in this repository; fetch it with frontend/scripts/fetch-onezoom.sh.
+      The page runs in an iframe because OneZoom keeps its state in module-level globals:
+      one viewer per page load.
+    -->
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; font-family: system-ui, sans-serif; }
+      #oz-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+      #status { position: absolute; inset: 0; display: none; place-items: center; color: #555; }
+      body.loading #status, body.missing #status { display: grid; }
+      body.missing #oz-canvas { display: none; }
+      .credit { position: absolute; right: 6px; bottom: 4px; font-size: 11px; color: #777; }
+      .credit a { color: inherit; }
+    </style>
+  </head>
+  <body class="loading">
+    <canvas id="oz-canvas"></canvas>
+    <div id="status">Loading tree…</div>
+    <div class="credit">Tree viewer: <a href="https://www.onezoom.org" target="_blank" rel="noreferrer">OneZoom</a></div>
+    <script src="vendor/OZentry.js" onerror="document.body.className = 'missing'; document.getElementById('status').textContent = 'OneZoom viewer not installed: run frontend/scripts/fetch-onezoom.sh'"></script>
+    <script src="viewer.js"></script>
+  </body>
+</html>

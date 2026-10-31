@@ -11,3 +11,6 @@ __pycache__/
 node_modules/
 dist/
 *.tsbuildinfo
+
+# OneZoom viewer bundle (OneZoom licence; fetched by frontend/scripts/fetch-onezoom.sh)
+frontend/public/oz-viewer/vendor/

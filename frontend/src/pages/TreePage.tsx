@@ -85,12 +85,12 @@ export function TreePage() {
   );
 }
 
-function SideSource({ id }: { id: number }) {
+export function SideSource({ id }: { id: number }) {
   const { byId } = useSources();
   return <SourceBadge sourceKey={byId(id)?.key} />;
 }
 
-function SelectedSummary({ id }: { id: number }) {
+export function SelectedSummary({ id }: { id: number }) {
   const state = useAsync(() => api.taxon(id), [id]);
   const t = state.data;
   if (!t || t.id !== id) return <Status state={state} />;
