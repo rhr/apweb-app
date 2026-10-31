@@ -15,6 +15,9 @@ from . import config
 PREDICATES = {
     # name: (object_type, description)
     "child_of": ("concept", "Subject is an immediate member/subclade of object."),
+    "conflicts_with": ("concept", "Subject is a clade asserted on some source pages whose members "
+                       "overlap the object's without nesting; the object is better supported, "
+                       "so the subject is left out of the hierarchy. Qualifiers: pages, support."),
     "has_character": ("literal", "Character state in the subject's characterization. "
                       "Qualifiers: apomorphy, uncertain, position."),
     "family_count": ("literal", "Number of families."),

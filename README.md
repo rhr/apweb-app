@@ -27,7 +27,7 @@ concept >──< alignment >──< concept           (APWeb "Vitaceae" same_nam
   are linked by `alignment` rows: `same_name`, or `congruent` when both contain the same
   set of orders.
 - **Predicates** (`predicate` table): `child_of`, `has_character`, `family_count`,
-  `genus_count`, `species_count`, `distribution`, `synonym`, `discussed_in`.
+  `genus_count`, `species_count`, `distribution`, `synonym`, `discussed_in`, `conflicts_with`.
 - **Full-text search** (SQLite FTS5) covers labels, characters, topics and references.
 
 Schema: [`backend/src/apw/schema.sql`](backend/src/apw/schema.sql).
@@ -196,10 +196,31 @@ member sets. Each node's parent is then chosen by weighted vote:
 | … resolved elsewhere, or fuzzily (APWeb's `anc` values have typos) | 1.5 / 1 |
 | document structure | 1 |
 
-Rank-consistency rules and cycle breaking follow the vote. Where APWeb's pages disagree
-with each other (e.g. `[[Fabales + Fagales] [Cucurbitales + Rosales]]` on one page and
+Each order page carries its own copy of the backbone, revised at different times, so
+pages can disagree: `cardiopteridalesweb.htm` has `[[Icacinales, Garryales, Aquifoliales]
++ …]`, while six other lamiid pages have `[Garryales, Aquifoliales, [Icacinales + …]]`.
+Before voting, every bracket clade is treated as a set of header-backed members and the
+clades are checked for compatibility (two clades must nest or be disjoint). Clades are
+accepted greedily, ranked by:
+1. the number of pages stating them;
+2. fewest clashes with other clades;
+3. the most recent page date (from the manifest's `Last-Modified`).
+
+A clade that partly overlaps an accepted one is left out of the hierarchy and recorded
+as `conflicts_with` the accepted clade, with the pages stating each. Votes for it are
+passed up to wherever it was placed. The accepted clades then decide each member's
+parent. Members that a page does not itself treat ("etc", misspellings, a subfamily
+from another order) count as wildcards rather than contradictions, and near-identical
+misspelt copies of a clade are merged.
+
+Rank-consistency rules and cycle breaking follow the vote. Where the votes for a parent
+still disagree (e.g. `[[Fabales + Fagales] [Cucurbitales + Rosales]]` on one page and
 `[Rosales [Cucurbitales + Fagales]]` on another), the alternatives are kept in the claim's
 qualifiers and listed by `apw conflicts`.
+
+Vernacular names ("Spermacoceae alliance", "Old World Clade") are kept whole rather than
+split into a name and an authority. When one is given as an alternative name, it merges
+nodes only on its own page, because several families reuse names like "Old World clade".
 
 In-text citations ("Wen et al. (2013)", "(Magallón & Castillo 2009; Endress 2010c)") are
 resolved against APWeb's bibliography using:

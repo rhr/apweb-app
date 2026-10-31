@@ -85,6 +85,9 @@ def test_parse_alt_names_and_authorities():
     assert pages.parse_alt("Rubiodae Robbrecht & Manen")[0] == "Rubiodae"
     assert pages.parse_alt("Boryaceae et al.")[0] == "Boryaceae et al"
     assert pages.parse_alt("TRACHEOPHYTA†") == ("TRACHEOPHYTA", None, True)
+    # vernacular names have no authority to split off
+    assert pages.parse_alt("Fooeae alliance") == ("Fooeae alliance", None, False)
+    assert pages.parse_alt("Old World Clade") == ("Old World Clade", None, False)
 
 
 def test_parse_head_ranks():
@@ -188,3 +191,29 @@ def test_family_discussion_after_subgroups_belongs_to_family():
     assert list(hs["Saraceae"].topics) == ["Age"]
     assert "Evolution/Divergence & Distribution" in hs["Fooaceae"].topics
     assert not hs["Bazeae"].topics
+
+
+def _spine_page(order: str, spine: str) -> str:
+    return f"""<html><body>
+<p><b><a name=Root>ROOTOPHYTA</a></b> Somebody</p>
+<p>trait one.</p>
+<p>{spine}: shared thing.</p>
+<p><b><a name="{order}">{order.upper()}</a></b> Author</p>
+<p><b><a name="{order}F" anc="{order}">{order.upper()[:-4]}ACEAE</a></b> Brown</p>
+</body></html>"""
+
+
+def test_assembler_leaves_out_clades_contradicted_by_other_pages():
+    # two pages say [Alphales + [Betales + Gammales]]; a stale one says [[Alphales + Betales] + Gammales]
+    current = "[ALPHALES + [BETALES + GAMMALES]]</p><p>[BETALES + GAMMALES]"
+    stale = "[[ALPHALES + BETALES] + GAMMALES]</p><p>[ALPHALES + BETALES]"
+    asm = Assembler({"a.htm": pages.parse_page("a.htm", _spine_page("Alphales", current)),
+                     "b.htm": pages.parse_page("b.htm", _spine_page("Betales", current)),
+                     "g.htm": pages.parse_page("g.htm", _spine_page("Gammales", stale))})
+    label = lambda k: asm.nodes[k].label
+    parents = {label(k): label(p) for k, (p, _, _) in asm.parents().items()}
+    assert {label(k): label(v) for k, v in asm.conflicts.items()} == \
+        {"[Alphales + Betales]": "[Betales + Gammales]"}
+    assert "[Alphales + Betales]" not in parents
+    assert parents["Betales"] == parents["Gammales"] == "[Betales + Gammales]"
+    assert parents["Alphales"] == parents["[Betales + Gammales]"] == "[Alphales + [Betales + Gammales]]"

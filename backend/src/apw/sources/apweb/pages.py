@@ -284,7 +284,13 @@ def parse_alt(alt: str) -> tuple[str, str | None, bool] | None:
     toks = alt.replace("†", " ").split()
     if not toks or not re.match(r"[A-Za-z×]", toks[0]):
         return None
-    if _is_upper(toks[0]):
+    vernacular = len(toks) > 1 and not any(_is_authority_start(t) for t in toks[1:]) and (
+        all(re.fullmatch(r"[a-z][a-z-]*", t) and t not in ("et", "al") for t in toks[1:])
+        or (len(toks) <= 4 and toks[-1].lower() in ("clade", "group", "grade", "alliance")))
+    if vernacular and not _is_upper(toks[0]):
+        # 'Spermacoceae alliance', 'Old World Clade': no authority to split off
+        i = len(toks)
+    elif _is_upper(toks[0]):
         i = 1
         while i < len(toks) and (_is_upper(toks[i]) or re.fullmatch(r"[IVX]+", toks[i])):
             i += 1

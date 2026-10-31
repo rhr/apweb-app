@@ -8,12 +8,19 @@ and bracket member sets. Each node's parent is chosen by weighted vote over:
   anc       the anchor's anc="..." attribute, resolved exactly on the page          (2)
   anc~      ... resolved elsewhere, or fuzzily (APWeb's anc values have typos)     (1.5/1)
   structure document order (previous spine line; nearest higher-ranked header)     (1)
+
+Pages are updated at different times, so they can disagree on topology (e.g. asterid i
+on the Cardiopteridales vs the Lamiales page, or a stale [Metteniusales + [Garryales ...]]
+line). Clades whose member sets are incompatible with a better-supported clade are left
+out of the hierarchy; see Assembler._resolve_conflicts.
 """
 
 from __future__ import annotations
 
 import difflib
+import email.utils
 import json
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,7 +36,10 @@ console = Console(stderr=True)
 WEIGHTS = {"bracket": 3.0, "anc": 2.0, "anc-global": 1.5, "anc-fuzzy": 1.0, "structure": 1.0}
 LEVEL = {"order": 1, "suborder": 1.5, "family": 2, "subfamily": 3, "supertribe": 3.5, "tribe": 4, "subtribe": 5, "genus": 3}
 NON_ORDER_PAGES = {"orders/characters.htm"}
-NAME_ALIASES = {"monocotyledons": "monocots", "monocotyledoneae": "monocots"}
+NAME_ALIASES = {"monocotyledons": "monocots", "monocotyledoneae": "monocots",
+                "centrosperms": "centrospermae"}
+VERNACULAR = re.compile(r"(?i)\s(?:clade|group|grade|alliance)$")
+FILLER = {"n:etc", "n:the rest", "n:rest", "n:others"}     # not taxa, though some head a section
 
 
 def canon(name: str) -> str:
@@ -106,12 +116,18 @@ class Node:
 
 
 class Assembler:
-    def __init__(self, page_headers: dict[str, list[pages.Header]]):
+    def __init__(self, page_headers: dict[str, list[pages.Header]],
+                 page_dates: dict[str, float] | None = None):
         self.page_headers = page_headers
+        self.page_dates = page_dates or {}
         self.uf = UF()
         self.nodes: dict[str, Node] = {}
+        self._group_keys: dict[int, str] = {}      # frozen after _merge
         self.header_names = {canon(n) for hs in page_headers.values() for h in hs for n in h.names}
+        self.page_terms = {p: {canon(a) for h in hs for a in h.atoms} |
+                           {canon(n) for h in hs for n in h.names[:1]} for p, hs in page_headers.items()}
         self._merge()
+        self._resolve_conflicts()
         self._vote()
 
     # -- identity
@@ -123,21 +139,33 @@ class Assembler:
         return "n:" + n
 
     def _group_key(self, g: pages.Group) -> str:
+        if id(g) in self._group_keys:
+            return self._group_keys[id(g)]
         return "s:" + "|".join(sorted({self.uf.find(self.atom_key(a)) for a in g.atoms()}))
 
+    def identity_names(self, h: pages.Header) -> list[str]:
+        """Names that identify the clade site-wide. Vernacular alternatives are not unique
+        ('Old World clade' is in both Fabaceae and Apocynaceae): they count only where
+        their own page uses them ('Dalbergioid clade' in a Fabales bracket)."""
+        return h.names[:1] + [n for n in h.names[1:] if not VERNACULAR.search(n)
+                              or canon(n) in self.page_terms[h.page]]
+
     def _keys(self, h: pages.Header) -> list[str]:
-        return ["n:" + canon(n) for n in h.names] + [self._group_key(g) for g in h.groups]
+        return ["n:" + canon(n) for n in self.identity_names(h)] + \
+            [self._group_key(g) for g in h.groups]
 
     def _merge(self) -> None:
         all_headers = [h for hs in self.page_headers.values() for h in hs]
         for h in all_headers:
-            for n in h.names[1:]:
+            for n in self.identity_names(h)[1:]:
                 self.uf.union("n:" + canon(h.names[0]), "n:" + canon(n))
         for _ in range(2):  # group keys depend on name merges, which groups can extend
             for h in all_headers:
                 ks = self._keys(h)
                 for k in ks[1:]:
                     self.uf.union(ks[0], k)
+        self._group_keys = {id(sub): self._group_key(sub)
+                            for h in all_headers for g in h.groups for sub in g.groups()}
         for h in all_headers:
             self.node_for_key(self._keys(h)[0]).headers.append(h)
             for g in h.groups:
@@ -157,6 +185,137 @@ class Assembler:
 
     def node_of(self, h: pages.Header) -> Node:
         return self.node_for_key(self._keys(h)[0])
+
+    # -- conflicting clades
+
+    def clusters(self) -> dict[str, tuple[frozenset[str], frozenset[str]]]:
+        """Clades with members, as (terminal clades beneath them, unknown members).
+        Members that are themselves clades with members are expanded (e.g. Lamiidae in
+        [Lamiidae + Campanulidae]). Only taxa with a header somewhere are terminals; others
+        ('etc', typos like 'Ecdeicoleaceae') are unknowns that may stand for any taxon."""
+        direct: dict[str, set[str]] = {}
+        for key, node in self.nodes.items():
+            atoms = node.atoms | {a for h in node.headers for a in h.atoms}
+            if atoms:
+                direct[key] = {self.uf.find(self.atom_key(a)) for a in atoms} - {key}
+        memo: dict[str, tuple[frozenset[str], frozenset[str]]] = {}
+
+        def leaves(key: str, stack: set[str]) -> tuple[frozenset[str], frozenset[str]]:
+            if key in memo:
+                return memo[key]
+            if key not in direct or key in stack:
+                known = self.nodes[key].headers and key not in FILLER
+                return (frozenset({key}), frozenset()) if known else (frozenset(), frozenset({key}))
+            stack.add(key)
+            subs = [leaves(k, stack) for k in direct[key]]
+            stack.discard(key)
+            memo[key] = (frozenset().union(*(t for t, _ in subs)),
+                         frozenset().union(*(u for _, u in subs)))
+            return memo[key]
+        return {k: leaves(k, set()) for k in direct}
+
+    def _resolve_conflicts(self) -> None:
+        """Accept clades greedily, best supported first (pages asserting them; then fewest
+        contradictions with other clades, as a typo contradicts many; then the most recently
+        modified page). A clade that overlaps an accepted one without nesting is rejected.
+        self.conflicts maps rejected key -> the accepted clade it contradicts."""
+        self.support: dict[str, set[str]] = defaultdict(set)
+        for page, hs in self.page_headers.items():
+            for h in hs:
+                self.support[self.node_of(h).key].add(page)
+                for g in h.groups:
+                    for sub in g.groups():
+                        self.support[self.node_for_key(self._group_key(sub)).key].add(page)
+        # A page speaks only for the families and below that it treats; orders and above
+        # are on every page's spine. (gentianalesweb's APSA clade lists Aristolochioideae
+        # for Asclepiadoideae, which must not contradict Piperales.)
+        home = {k: {h.page for h in n.headers} for k, n in self.nodes.items()}
+        spine = {k for k, n in self.nodes.items() if n.headers and LEVEL.get(n.rank, 0) < 2}
+        clusters: dict[str, tuple[frozenset[str], int]] = {}
+        unknown: dict[str, frozenset[str]] = {}
+        for key, (s, u) in self.clusters().items():
+            known = frozenset(t for t in s if t in spine or home[t] & self.support[key])
+            if known:
+                unknown[key] = u | (s - known)
+                clusters[key] = (known, len(unknown[key]))
+
+        def compatible(a: tuple[frozenset[str], int], b: tuple[frozenset[str], int]) -> bool:
+            """Disjoint, or nested once each side's unknowns are filled in."""
+            (s, ws), (t, wt) = a, b
+            return not (s & t) or len(s - t) <= wt or len(t - s) <= ws
+
+        by_terminal: dict[str, list[str]] = defaultdict(list)
+        for key, (s, _) in clusters.items():
+            for t in s:
+                by_terminal[t].append(key)
+        n_clash = {key: sum(1 for o in {o for t in c[0] for o in by_terminal[t]}
+                            if not compatible(c, clusters[o])) for key, c in clusters.items()}
+        order = sorted(clusters, key=lambda k: (-len(self.support[k]), n_clash[k],
+                                                -max((self.page_dates.get(p, 0.0)
+                                                      for p in self.support[k]), default=0.0), k))
+        accepted: dict[str, tuple[frozenset[str], int]] = {}
+        self.conflicts: dict[str, str] = {}
+        for key in order:
+            c = clusters[key]
+            clash = next((a for a, d in accepted.items() if not compatible(c, d)), None)
+            if clash:
+                self.conflicts[key] = clash
+            else:
+                accepted[key] = c
+
+        # The same clade written twice with a typo ([Aneomoneae + Ranunculeae] /
+        # [Anemoneae + Ranunculeae]): one node, under the better supported key.
+        def misspelt(a: str, b: str) -> bool:
+            """Each unknown member of a is a near-spelling of a member only b has."""
+            extra = accepted[b][0] - accepted[a][0]
+            return len(unknown[a]) == len(extra) and all(
+                difflib.get_close_matches(u, extra, n=1, cutoff=0.85) for u in unknown[a])
+
+        rank = {k: i for i, k in enumerate(accepted)}
+        same: dict[str, str] = {}
+        for key, (s, ws) in accepted.items():
+            for o in sorted({o for t in s for o in by_terminal[t] if o in rank}, key=rank.get):
+                if rank[o] >= rank[key]:
+                    break
+                t, wt = accepted[o]
+                if o not in same and len(s) + ws == len(t) + wt and (
+                        (s <= t and misspelt(key, o)) or (t <= s and misspelt(o, key))):
+                    same[key] = o
+                    break
+        for dup, keep in same.items():
+            self._absorb(keep, dup)
+        f = self.uf.find
+        support: dict[str, set[str]] = defaultdict(set)
+        for k, v in self.support.items():
+            support[f(k)] |= v
+        self.support = support
+        self.conflicts = {k: f(v) for k, v in self.conflicts.items()}
+        self.accepted = {k: (s, w, rank[k]) for k, (s, w) in accepted.items() if k not in same}
+
+    def _absorb(self, keep: str, dup: str) -> None:
+        """Merge node dup into node keep; keep's key stays the root."""
+        a, b = self.nodes.pop(keep), self.nodes.pop(dup)
+        self.uf.parent[self.uf.find(dup)] = keep
+        self.nodes[keep] = Node(keep, a.headers + b.headers, a.implicit_labels + b.implicit_labels,
+                                a.atoms | b.atoms)
+
+    def clade_parents(self) -> dict[str, str]:
+        """Parents entailed by the accepted clades: a terminal goes in the smallest clade
+        listing it, a clade in the smallest larger one containing it (unknown members
+        absorb the difference). Ties go to the better supported clade as the outer one."""
+        acc = self.accepted
+        size = {k: (len(s) + w, -i) for k, (s, w, i) in acc.items()}
+        by_terminal: dict[str, list[str]] = defaultdict(list)
+        for k, (s, _, _) in acc.items():
+            for t in s:
+                by_terminal[t].append(k)
+        out = {t: min(ks, key=size.get) for t, ks in by_terminal.items()}
+        for k, (s, _, _) in acc.items():
+            outer = [o for o in {o for t in s for o in by_terminal[t]}
+                     if size[o] > size[k] and len(s - acc[o][0]) <= acc[o][1]]
+            if outer:
+                out[k] = min(outer, key=size.get)
+        return out
 
     # -- parents
 
@@ -243,10 +402,39 @@ class Assembler:
     def parents(self) -> dict[str, tuple[str, float, dict]]:
         """Pick a parent per node; returns key -> (parent key, score, detail)."""
         scored: dict[str, list[tuple[float, str, dict]]] = {}
+        clade_parent = self.clade_parents()
+
+        def within(p: str, c: str) -> bool:
+            seen = set()
+            while p in clade_parent and p not in seen:
+                seen.add(p)
+                p = clade_parent[p]
+                if p == c:
+                    return True
+            return False
+
+        def lift(p: str) -> str | None:
+            """A vote for a rejected clade goes to where that clade itself was voted."""
+            seen = set()
+            while p in self.conflicts:
+                if p in seen or not self.nodes[p].votes:
+                    return None
+                seen.add(p)
+                vs = self.nodes[p].votes
+                p = max(vs, key=lambda q: (sum(vs[q].values()), q))
+            return p
+
         for key, node in self.nodes.items():
-            cands = []
-            has_order = any(self.nodes[p].rank == "order" for p in node.votes)
+            if key in self.conflicts:
+                continue
+            votes: dict[str, dict] = defaultdict(dict)
             for pkey, ev in node.votes.items():
+                pkey = lift(pkey)
+                if pkey is not None and pkey != key:
+                    votes[pkey].update(ev)
+            cands = []
+            has_order = any(self.nodes[p].rank == "order" for p in votes)
+            for pkey, ev in votes.items():
                 methods = Counter(m for _, m in ev)
                 score = sum(ev.values())
                 parent = self.nodes[pkey]
@@ -257,6 +445,12 @@ class Assembler:
                     score *= 0.25
                 cands.append((score, pkey, dict(methods)))
             cands.sort(key=lambda c: (-c[0], -c[2].get("bracket", 0), c[1]))
+            # the accepted clades decide, unless the votes pick something inside that clade
+            # (e.g. a family that is itself a member)
+            c = clade_parent.get(key)
+            if c and not (cands and (cands[0][1] == c or within(cands[0][1], c))):
+                ev = next((x for x in cands if x[1] == c), (0.0, c, {}))
+                cands = [(ev[0], c, {**ev[2], "members": 1})] + [x for x in cands if x[1] != c]
             scored[key] = cands
         choice = {k: 0 for k, c in scored.items() if c}
 
@@ -283,18 +477,19 @@ class Assembler:
             seen = set()
             while k in choice and k not in seen:
                 seen.add(k)
-                k = scored[k][choice[k]][1]
+                k = fallback[k] if k in fallback else scored[k][choice[k]][1]
             return seen | {k}
 
         fallback: dict[str, str] = {}
         for key, node in self.nodes.items():
-            if key in choice or not node.headers:
+            if key in choice or key in self.conflicts or not node.headers:
                 continue
             h = node.headers[0]
             hs = self.page_headers[h.page]
             for prev in reversed(hs[:h.seq]):
                 pnode = self.node_of(prev)
-                if prev.rank in ("family", "order") and key not in ancestors(pnode.key):
+                if prev.rank in ("family", "order") and pnode.key not in self.conflicts \
+                        and key not in ancestors(pnode.key):
                     fallback[key] = pnode.key
                     choice[key] = -1
                     break
@@ -376,7 +571,12 @@ def ingest(snapshot: str | None = None, con=None) -> dict:
     first = {p: pages.parse_page(p, h) for p, h in htmls.items()}
     families = {norm(n) for hs in first.values() for h in hs if h.rank == "family" for n in h.names}
     page_headers = {p: pages.parse_page(p, h, families) for p, h in htmls.items()}
-    asm = Assembler(page_headers)
+    page_dates = {}
+    for p in page_headers:
+        lm = manifest["orders/" + p].get("last_modified")
+        if lm:
+            page_dates[p] = email.utils.parsedate_to_datetime(lm).timestamp()
+    asm = Assembler(page_headers, page_dates)
     console.print(f"pages: {len(page_headers)}, headers: "
                   f"{sum(map(len, page_headers.values()))}, nodes: {len(asm.nodes)}")
 
@@ -405,6 +605,12 @@ def ingest(snapshot: str | None = None, con=None) -> dict:
     for key, (pkey, score, detail) in parents.items():
         store.claim(cid[key], "child_of", object_id=cid[pkey],
                     qualifiers={"score": score, **detail}, index=False)
+    for key, other in asm.conflicts.items():
+        store.claim(cid[key], "conflicts_with", object_id=cid[other],
+                    qualifiers={"pages": sorted(asm.support[key]),
+                                "support": len(asm.support[key]),
+                                "object_support": len(asm.support[other])}, index=False)
+    console.print(f"conflicting clades left out of the hierarchy: {len(asm.conflicts)}")
 
     # characters, stats, synonyms, literature
     stats = Counter()
