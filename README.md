@@ -51,6 +51,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 export APW_CONTACT=you@example.org   # Wikimedia requires contact info in the User-Agent
 .venv/bin/apw crawl apg              # APG I–IV wikitext, pinned to revision ids
 .venv/bin/apw ingest all             # parse → data/apw.sqlite, then align sources
+                                     # also writes data/reports/apweb-errata-<date>.html
 .venv/bin/pytest -q
 ```
 
@@ -209,9 +210,13 @@ accepted greedily, ranked by:
 A clade that partly overlaps an accepted one is left out of the hierarchy and recorded
 as `conflicts_with` the accepted clade, with the pages stating each. Votes for it are
 passed up to wherever it was placed. The accepted clades then decide each member's
-parent. Members that a page does not itself treat ("etc", misspellings, a subfamily
-from another order) count as wildcards rather than contradictions, and near-identical
-misspelt copies of a clade are merged.
+parent. Members are taxa with a header, or single Latin names a page uses in two or
+more of its headers (genera, fern subfamilies). Members that a page does not itself
+treat ("etc", misspellings, a subfamily from another order) count as wildcards rather
+than contradictions. Copies of one clade, whether misspelt or with the same members
+nested differently, are merged into one node. Clades with the same members that APWeb
+writes as a grade (`[Senegalia ii + R]`, `[Senegalia iii + R]`, …) nest in the order
+their `anc` links give.
 
 Rank-consistency rules and cycle breaking follow the vote. Where the votes for a parent
 still disagree (e.g. `[[Fabales + Fagales] [Cucurbitales + Rosales]]` on one page and
@@ -221,6 +226,20 @@ qualifiers and listed by `apw conflicts`.
 Vernacular names ("Spermacoceae alliance", "Old World Clade") are kept whole rather than
 split into a name and an authority. When one is given as an alternative name, it merges
 nodes only on its own page, because several families reuse names like "Old World clade".
+
+Each APWeb ingest also writes an errata report, `data/reports/apweb-errata-<snapshot>.html`
+(`sources/apweb/errata.py`), meant for the site's authors. It lists:
+- clades left out because other pages, or the same page, contradict them;
+- bracket names for a family or below that only another order's page treats;
+- lines marked as alternatives ("if this clade exists", in its various wordings);
+- names spelled two ways on a page;
+- slips the parse repairs, so the authors can fix them: names run together without a
+  comma, and misspelt bracket members matched to the right taxon;
+- header lines with unbalanced brackets;
+- `anc` attributes naming anchors that exist nowhere;
+- links to order pages the crawl could not fetch.
+
+Each item quotes the header line and links to its page and anchor.
 
 In-text citations ("Wen et al. (2013)", "(Magallón & Castillo 2009; Endress 2010c)") are
 resolved against APWeb's bibliography using:

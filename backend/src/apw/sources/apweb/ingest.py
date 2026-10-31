@@ -29,17 +29,23 @@ from rich.console import Console
 
 from ... import db
 from ...db import Store, norm
-from . import citations, crawl, pages, references
+from . import citations, crawl, errata, pages, references
 
 console = Console(stderr=True)
 
 WEIGHTS = {"bracket": 3.0, "anc": 2.0, "anc-global": 1.5, "anc-fuzzy": 1.0, "structure": 1.0}
-LEVEL = {"order": 1, "suborder": 1.5, "family": 2, "subfamily": 3, "supertribe": 3.5, "tribe": 4, "subtribe": 5, "genus": 3}
+LEVEL = {"subclass": 0.6, "superorder": 0.8, "order": 1, "suborder": 1.5, "family": 2, "subfamily": 3, "supertribe": 3.5, "tribe": 4, "subtribe": 5, "genus": 3}
 NON_ORDER_PAGES = {"orders/characters.htm"}
 NAME_ALIASES = {"monocotyledons": "monocots", "monocotyledoneae": "monocots",
                 "centrosperms": "centrospermae"}
 VERNACULAR = re.compile(r"(?i)\s(?:clade|group|grade|alliance)$")
+RANK_SUFFIXES = ("oideae", "aceae", "ineae", "inae", "odae", "idae", "anae", "ales", "eae")
 FILLER = {"n:etc", "n:the rest", "n:rest", "n:others"}     # not taxa, though some head a section
+
+
+def rank_suffix(name: str) -> str | None:
+    """Ophioglossoideae and Ophioglossaceae differ in rank, not by a typo."""
+    return next((x for x in RANK_SUFFIXES if name.endswith(x)), None)
 
 
 def canon(name: str) -> str:
@@ -191,8 +197,8 @@ class Assembler:
     def clusters(self) -> dict[str, tuple[frozenset[str], frozenset[str]]]:
         """Clades with members, as (terminal clades beneath them, unknown members).
         Members that are themselves clades with members are expanded (e.g. Lamiidae in
-        [Lamiidae + Campanulidae]). Only taxa with a header somewhere are terminals; others
-        ('etc', typos like 'Ecdeicoleaceae') are unknowns that may stand for any taxon."""
+        [Lamiidae + Campanulidae]). Only self.terminals are terminals; other members ('etc',
+        typos like 'Ecdeicoleaceae') are unknowns that may stand for any taxon."""
         direct: dict[str, set[str]] = {}
         for key, node in self.nodes.items():
             atoms = node.atoms | {a for h in node.headers for a in h.atoms}
@@ -204,7 +210,7 @@ class Assembler:
             if key in memo:
                 return memo[key]
             if key not in direct or key in stack:
-                known = self.nodes[key].headers and key not in FILLER
+                known = key in self.terminals
                 return (frozenset({key}), frozenset()) if known else (frozenset(), frozenset({key}))
             stack.add(key)
             subs = [leaves(k, stack) for k in direct[key]]
@@ -213,6 +219,30 @@ class Assembler:
                          frozenset().union(*(u for _, u in subs)))
             return memo[key]
         return {k: leaves(k, set()) for k in direct}
+
+    def _terminals(self) -> dict[str, set[str]]:
+        """Taxa that count as members of clades, with the pages that treat them: those with
+        a header, and those without one (genera, fern subfamilies) that a page names in two
+        or more of its headers. A name without a header must be one Latin word ('Ixorodae
+        Airospermeae' lacks a comma; 'Ochnoids' is informal), and not a near-spelling of a
+        header-backed taxon on the same page ('Alzataeaceae' for Alzateaceae)."""
+        out: dict[str, set[str]] = defaultdict(set)
+        for k, n in self.nodes.items():
+            if n.headers and k not in FILLER:
+                out[k] |= {h.page for h in n.headers}
+        for page, hs in self.page_headers.items():
+            names = sorted(self.header_names & self.page_terms[page])
+            seen: Counter[str] = Counter()
+            for h in hs:
+                seen.update({self.uf.find(self.atom_key(a)) for a in h.atoms if a[:1].isupper()})
+            for k, c in seen.items():
+                if c < 2 or k in FILLER or self.nodes[k].headers \
+                        or not re.fullmatch(r"n:[a-zë]+", k) or k.endswith("oids"):
+                    continue
+                if not any(rank_suffix(m) == rank_suffix(k[2:]) or not rank_suffix(m)
+                           for m in difflib.get_close_matches(k[2:], names, n=3, cutoff=0.85)):
+                    out[k].add(page)
+        return out
 
     def _resolve_conflicts(self) -> None:
         """Accept clades greedily, best supported first (pages asserting them; then fewest
@@ -229,7 +259,7 @@ class Assembler:
         # A page speaks only for the families and below that it treats; orders and above
         # are on every page's spine. (gentianalesweb's APSA clade lists Aristolochioideae
         # for Asclepiadoideae, which must not contradict Piperales.)
-        home = {k: {h.page for h in n.headers} for k, n in self.nodes.items()}
+        self.terminals = home = self._terminals()
         spine = {k for k, n in self.nodes.items() if n.headers and LEVEL.get(n.rank, 0) < 2}
         clusters: dict[str, tuple[frozenset[str], int]] = {}
         unknown: dict[str, frozenset[str]] = {}
@@ -263,13 +293,16 @@ class Assembler:
             else:
                 accepted[key] = c
 
-        # The same clade written twice with a typo ([Aneomoneae + Ranunculeae] /
-        # [Anemoneae + Ranunculeae]): one node, under the better supported key.
+        # The same clade written twice, with a typo ([Aneomoneae + Ranunculeae] /
+        # [Anemoneae + Ranunculeae]) or with the same members nested differently: one node,
+        # under the better supported key. (The contradicting inner clade is rejected above.)
         def misspelt(a: str, b: str) -> bool:
-            """Each unknown member of a is a near-spelling of a member only b has."""
+            """Each unknown member of a not also in b is a near-spelling of a member only
+            b has."""
             extra = accepted[b][0] - accepted[a][0]
-            return len(unknown[a]) == len(extra) and all(
-                difflib.get_close_matches(u, extra, n=1, cutoff=0.85) for u in unknown[a])
+            typos = unknown[a] - unknown[b]
+            return len(typos) == len(extra) and all(
+                difflib.get_close_matches(u, extra, n=1, cutoff=0.85) for u in typos)
 
         rank = {k: i for i, k in enumerate(accepted)}
         same: dict[str, str] = {}
@@ -282,6 +315,15 @@ class Assembler:
                         (s <= t and misspelt(key, o)) or (t <= s and misspelt(o, key))):
                     same[key] = o
                     break
+        # what was misspelt, for the errata: unknown member -> the terminal it stands for
+        self.misspellings: dict[str, str] = {}
+        for dup, keep in same.items():
+            for a, b in ((dup, keep), (keep, dup)):
+                extra = accepted[b][0] - accepted[a][0]
+                for u in unknown[a] - unknown[b]:
+                    m = difflib.get_close_matches(u, extra, n=1, cutoff=0.85)
+                    if m:
+                        self.misspellings[u] = m[0]
         for dup, keep in same.items():
             self._absorb(keep, dup)
         f = self.uf.find
@@ -302,19 +344,71 @@ class Assembler:
     def clade_parents(self) -> dict[str, str]:
         """Parents entailed by the accepted clades: a terminal goes in the smallest clade
         listing it, a clade in the smallest larger one containing it (unknown members
-        absorb the difference). Ties go to the better supported clade as the outer one."""
+        absorb the difference). Clades of equal size nest as their votes say: APWeb writes
+        a grade as a run of headers, [Senegalia ii + R], [Senegalia iii + R], ..., each
+        anc-linked to the one before. Otherwise the better supported clade is the outer."""
         acc = self.accepted
-        size = {k: (len(s) + w, -i) for k, (s, w, i) in acc.items()}
+        size = {k: len(s) + w for k, (s, w, _) in acc.items()}
         by_terminal: dict[str, list[str]] = defaultdict(list)
         for k, (s, _, _) in acc.items():
             for t in s:
                 by_terminal[t].append(k)
-        out = {t: min(ks, key=size.get) for t, ks in by_terminal.items()}
+
+        def contains(o: str, k: str) -> bool:
+            return len(acc[k][0] - acc[o][0]) <= acc[o][1]
+
+        reached: dict[str, set[str]] = {}
+
+        def reach(k: str) -> set[str]:
+            """Equal-size clades that k is voted into, directly or through each other."""
+            if k not in reached:
+                out, stack = set(), [k]
+                while stack:
+                    x = stack.pop()
+                    for o in self.nodes[x].votes:
+                        if o in acc and o != k and o not in out and size[o] == size[k] \
+                                and contains(o, x):
+                            out.add(o)
+                            stack.append(o)
+                reached[k] = out
+            return reached[k]
+
+        def inside(k: str, o: str) -> bool:
+            if size[o] != size[k]:
+                return size[o] > size[k]
+            if o in reach(k) or k in reach(o):
+                return o in reach(k)
+            return acc[o][2] < acc[k][2]
+
+        def innermost(ks: list[str]) -> str:
+            m = min(size[o] for o in ks)
+            ties = [o for o in ks if size[o] == m]
+            return max(ties, key=lambda o: (sum(inside(o, x) for x in ties if x != o), acc[o][2]))
+
+        out = {t: innermost(ks) for t, ks in by_terminal.items()}
+        homeless = []
         for k, (s, _, _) in acc.items():
             outer = [o for o in {o for t in s for o in by_terminal[t]}
-                     if size[o] > size[k] and len(s - acc[o][0]) <= acc[o][1]]
+                     if o != k and contains(o, k) and inside(k, o)]
             if outer:
-                out[k] = min(outer, key=size.get)
+                out[k] = innermost(outer)
+            else:
+                homeless.append(k)
+        # A clade no other contains (Old World Clade's own bracket is in abbreviations,
+        # [Indig, Mill.-Phas, Rob, IRL Clade], so it holds less than the Millettioid clade
+        # nested in it) goes where its largest nested clade goes.
+        for k in homeless:
+            s = acc[k][0]
+            inner = [o for o in {o for t in s for o in by_terminal[t]}
+                     if o != k and o in out and out[o] != k and contains(k, o) and inside(o, k)]
+            if inner:
+                o = max(inner, key=lambda o: (size[o], -acc[o][2]))
+                p, seen = out[o], set()
+                while p in out and p != k and p not in seen:      # unless that is inside k
+                    seen.add(p)
+                    p = out[p]
+                if p != k:
+                    out[k] = out[o]
         return out
 
     # -- parents
@@ -334,7 +428,11 @@ class Assembler:
             known = [x for x in (self.node_level(self.node_for_key(self.atom_key(a)), depth + 1)
                                  for a in atoms) if x is not None]
             if known:
+                # just above the members, and not level with a main rank: a clade of
+                # supertribes (3.5) is inside the subfamily (3)
                 lv = min(known) - 0.5
+                if lv in (1, 2, 3, 4):
+                    lv += 0.25
             else:      # named clade without members in its label: use its bracket children
                 kids = [x for x in (self.node_level(self.nodes[k], depth + 1)
                                     for k in self.bracket_children.get(node.key, ())) if x is not None]
@@ -373,6 +471,7 @@ class Assembler:
         for page, hs in self.page_headers.items():
             anchors = {h.anchor: self.node_of(h) for h in hs if h.anchor}
             first_order = next((i for i, h in enumerate(hs) if h.rank == "order"), len(hs))
+            last_order = max((i for i, h in enumerate(hs) if h.rank == "order"), default=-1)
             levels = []
             for i, h in enumerate(hs):
                 if i < first_order:                    # backbone
@@ -380,8 +479,18 @@ class Assembler:
                 elif i == first_order or h.rank == "order":
                     levels.append(1.0)
                 else:
-                    lv = self.node_level(self.node_of(h))
-                    levels.append(5.5 if lv is None else max(1.1, lv))
+                    # below the order, except on pages that treat several orders
+                    # (Sporing.html): subclasses, clades of orders and above, and named
+                    # clades of unknown level followed by another order (Polypodiopsida)
+                    node = self.node_of(h)
+                    lv = self.node_level(node)
+                    if lv is None and i < last_order and h.rank == "clade" and not h.informal:
+                        lv = 0.0
+                    elif lv is not None and lv < 1 and any(
+                            (x := self.node_level(self.node_for_key(self.atom_key(a)))) is not None
+                            and x >= 2 for a in node.atoms | h.atoms):
+                        lv = 1.1
+                    levels.append(5.5 if lv is None else lv if lv < 1 else max(1.1, lv))
             for i, h in enumerate(hs):
                 node = self.node_of(h)
                 if h.anc:
@@ -412,6 +521,14 @@ class Assembler:
                 if p == c:
                     return True
             return False
+
+        def fits(p: str, key: str) -> bool:
+            """An accepted clade can hold key only if key's members are among its own."""
+            if p not in self.accepted:
+                return True
+            s = self.accepted[key][0] if key in self.accepted else \
+                {key} if key in self.terminals else set()
+            return len(s - self.accepted[p][0]) <= self.accepted[p][1]
 
         def lift(p: str) -> str | None:
             """A vote for a rejected clade goes to where that clade itself was voted."""
@@ -446,9 +563,11 @@ class Assembler:
                 cands.append((score, pkey, dict(methods)))
             cands.sort(key=lambda c: (-c[0], -c[2].get("bracket", 0), c[1]))
             # the accepted clades decide, unless the votes pick something inside that clade
-            # (e.g. a family that is itself a member)
+            # (e.g. a family that is itself a member) that can hold this one
             c = clade_parent.get(key)
-            if c and not (cands and (cands[0][1] == c or within(cands[0][1], c))):
+            top = cands[0][1] if cands else None
+            if c and not (top == c or top and within(top, c) and not within(top, key)
+                          and fits(top, key)):
                 ev = next((x for x in cands if x[1] == c), (0.0, c, {}))
                 cands = [(ev[0], c, {**ev[2], "members": 1})] + [x for x in cands if x[1] != c]
             scored[key] = cands
@@ -675,4 +794,7 @@ def ingest(snapshot: str | None = None, con=None) -> dict:
                     stats["citations_resolved"] += ref is not None
     con.commit()
     stats.update(nodes=len(asm.nodes), references=n_refs, parented=len(parents))
+
+    report = errata.write(errata.build(snapshot, manifest, htmls, asm))
+    console.print(f"errata: {report}")
     return dict(stats)

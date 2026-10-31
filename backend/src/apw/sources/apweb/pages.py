@@ -53,6 +53,10 @@ class Group:
         return "[" + sep.join(parts) + "]"
 
 
+_SUPRAGENERIC = r"[A-Z][a-z]+(?:oideae|aceae|odae|idae|inae|ales|eae)"
+RUN_ON = re.compile(rf"{_SUPRAGENERIC}(?: {_SUPRAGENERIC})+")
+
+
 def parse_brackets(s: str) -> Group | None:
     """Parse '[A [B + C]]', '[A, B, [C + D]' (unbalanced tolerated) into a Group tree."""
     s = re.sub(r"\([^()\[\]]*\)?", "", s)      # '(if this clade exists)' etc.
@@ -72,7 +76,9 @@ def parse_brackets(s: str) -> Group | None:
             continue
         else:
             name = clean_atom(tok)
-            if name:
+            if name and RUN_ON.fullmatch(name):   # 'Ixorodae Airospermeae': a lost comma
+                stack[-1].extend(name.split())
+            elif name:
                 stack[-1].append(name)
     while len(stack) > 1:                      # close unbalanced brackets
         members = stack.pop()
@@ -153,6 +159,7 @@ class Header:
     synonyms: list[tuple[str, str]] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
     distribution: str | None = None
+    text: str = ""                   # the header line as written, up to the label colon
 
     @property
     def label(self) -> str:
@@ -555,7 +562,8 @@ def _make_header(page: str, seq: int, p: Tag, a: Tag | None, text: str) -> Heade
     rank = infer_rank(names[0] if names else "", informal, enumerated, upper)
     h = Header(page=page, seq=seq, anchor=a.get("name") if a else None,
                anc=a.get("anc") if a else None, names=names, groups=groups,
-               authorship=auth, rank=rank, informal=informal, dagger=dagger)
+               authorship=auth, rank=rank, informal=informal, dagger=dagger,
+               text=(text[:colon] if colon >= 0 else text)[:600].strip())
     if syn_text:
         h.synonyms.extend(_synonyms(syn_text))
     if colon >= 0:

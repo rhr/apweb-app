@@ -76,6 +76,11 @@ def test_parse_brackets_nested_and_unbalanced():
     poly = pages.parse_brackets("[SANTALALES, VITALES, [BERBERIDOPSIDALES + ASTERIDAE]")
     assert poly.atoms() == {"SANTALALES", "VITALES", "BERBERIDOPSIDALES", "ASTERIDAE"}
     assert pages.parse_brackets("[[A + B] + (if this clade exists)]").render() == "[A + B]"
+    # a lost comma between two taxa; vernacular names stay whole
+    assert pages.parse_brackets("[Jackieae, Ixorodae Airospermeae, Coffeodae]").atoms() == \
+        {"Jackieae", "Ixorodae", "Airospermeae", "Coffeodae"}
+    assert pages.parse_brackets("[Woody Myrsinoideae + Core Brassicales]").atoms() == \
+        {"Woody Myrsinoideae", "Core Brassicales"}
 
 
 def test_parse_alt_names_and_authorities():
@@ -217,3 +222,100 @@ def test_assembler_leaves_out_clades_contradicted_by_other_pages():
     assert "[Alphales + Betales]" not in parents
     assert parents["Betales"] == parents["Gammales"] == "[Betales + Gammales]"
     assert parents["Alphales"] == parents["[Betales + Gammales]"] == "[Alphales + [Betales + Gammales]]"
+
+
+def _family_page(body: str) -> dict[str, list[pages.Header]]:
+    html = f"""<html><body>
+<p><b><a name="Alphales" anc="X">ALPHALES</a></b> Author</p>
+<p><b><a name="Fooaceae" anc="Alphales">FOOACEAE</a></b> Smith</p>
+{body}
+</body></html>"""
+    return {"a.htm": pages.parse_page("a.htm", html, families={"fooaceae"})}
+
+
+def _parents(asm: Assembler) -> dict[str, str]:
+    label = lambda k: asm.nodes[k].label
+    return {label(k): label(p) for k, (p, _, _) in asm.parents().items()}
+
+
+def test_assembler_merges_copies_of_a_clade():
+    # the same three subfamilies nested two ways, and a misspelt copy with an 'etc'
+    asm = Assembler(_family_page("""
+<p><a name="AB" anc="Fooaceae"><u>[Aoideae + [Boideae + Coideae]]</u></a>: x.</p>
+<p><a name="BA"><u>[Coideae + [Aoideae + Boideae]]</u></a>: x.</p>
+<p><a name="Aoideae" anc="AB"><b>Aoideae</b></a> Doe</p>
+<p><a name="Boideae" anc="AB"><b>Boideae</b></a> Doe</p>
+<p><a name="Coideae" anc="AB"><b>Coideae</b></a> Doe</p>
+<p><a name="DE"><u>[etc + [Doideae + Eoideae]]</u></a>: x.</p>
+<p><a name="DE2"><u>[etc + [Doideae + Eiodeae]]</u></a>: x.</p>
+<p><a name="Doideae" anc="DE"><b>Doideae</b></a> Doe</p>
+<p><a name="Eoideae" anc="DE"><b>Eoideae</b></a> Doe</p>"""))
+    parents = _parents(asm)
+    outer = {"[Aoideae + [Boideae + Coideae]]", "[Coideae + [Aoideae + Boideae]]"}
+    assert len(outer & set(parents)) == 1                  # one node for both
+    assert len(asm.conflicts) == 1                         # one inner pair left out
+    assert len({"[etc + [Doideae + Eoideae]]", "[etc + [Doideae + Eiodeae]]"} & set(parents)) == 1
+    assert parents["Doideae"] == parents["Eoideae"]
+
+
+def test_assembler_nests_a_grade_written_as_a_run_of_headers():
+    # grades of one clade, written as headers anc-linked each to the last (APWeb's
+    # Senegalia i-iv); their order here is not alphabetical
+    asm = Assembler(_family_page("""
+<p><a name="G1" anc="Fooaceae"><u>[Acacia z + [Calliandra + Inga]]</u></a>: x.</p>
+<p><a name="G2" anc="G1"><u>[Acacia y + [Calliandra + Inga]]</u></a>: x.</p>
+<p><a name="G3" anc="G2"><u>[Acacia x + [Calliandra + Inga]]</u></a>: x.</p>
+<p><a name="Calliandra" anc="G3"><b>Calliandra</b></a> Doe</p>
+<p><a name="Inga" anc="G3"><b>Inga</b></a> Doe</p>"""))
+    parents = _parents(asm)
+    assert parents["[Acacia x + [Calliandra + Inga]]"] == "[Acacia y + [Calliandra + Inga]]"
+    assert parents["[Acacia y + [Calliandra + Inga]]"] == "[Acacia z + [Calliandra + Inga]]"
+    assert parents["[Calliandra + Inga]"] == "[Acacia x + [Calliandra + Inga]]"
+
+
+def test_assembler_places_orders_under_subclasses_on_multi_order_pages():
+    # like Sporing.html: one page treating several orders, grouped by subclass
+    html = """<html><body>
+<p><b><a name=Root>ROOTOPHYTA</a></b> Somebody</p>
+<p><b><a name=Liv>LIVEROPHYTA</a></b> Somebody</p>
+<p><b><a name="Aales">AALES</a></b> Author</p>
+<p><b><a name="Ferns">FERNOPSIDA</a></b> Somebody</p>
+<p><b><a name="Ophidae">OPHIDAE</a></b> Somebody</p>
+<p><b><a name="Bales">BALES</a></b> Author</p>
+<p><b><a name="Baceae">BACEAE</a></b> Brown</p>
+<p><b><a name="Polyidae">POLYIDAE</a></b> Somebody</p>
+<p><b><a name="Cales">CALES</a></b> Author</p>
+</body></html>"""
+    parents = _parents(Assembler({"s.htm": pages.parse_page("s.htm", html)}))
+    assert parents["Bales"] == "Ophidae"
+    assert parents["Cales"] == "Polyidae"
+    assert parents["Baceae"] == "Bales"
+
+
+def test_errata_lists_conflicts_typos_and_broken_links():
+    from apw.sources.apweb import errata
+    current = "[ALPHALES + [BETALES + GAMMALES]]</p><p>[BETALES + GAMMALES]"
+    stale = "[[ALPHALES + BETALES] + GAMMALES]</p><p>[ALPHALES + BETALES]"
+    htmls = {"a.htm": _spine_page("Alphales", current), "b.htm": _spine_page("Betales", current),
+             "g.htm": _spine_page("Gammales", stale).replace("</body>", """
+<p><a name="FooBar" anc="Gamales"><u>[Fooideae + [Barideae + Bazideae]</u></a>: x.</p>
+<p><u>[Fooideae + Barideae] - if this clade exists</u>: y.</p>
+<p><a name="Fooideae"><b>Fooideae</b></a> Doe</p>
+<p><a name="Barideae"><b>Barideae</b></a> Doe</p>
+<p><a name="Bazideae"><b>Bazideae</b></a> Doe <a href="zetalesweb.htm">Zetales</a></p>
+<p><u>[Barideae + Bazidieae]</u>: z.</p>
+<p><u>[Fooideae, Barideae Bazideae]</u>: w.</p>
+</body>""")}
+    asm = Assembler({p: pages.parse_page(p, h) for p, h in htmls.items()})
+    manifest = {f"orders/{p}": {"sha256": p} for p in htmls}
+    er = errata.build("2026-01-01", manifest, htmls, asm)
+    assert [(c.rejected, c.accepted, c.pages) for c in er.backbone] == \
+        [("[Alphales + Betales]", "[Betales + Gammales]", ["g.htm"])]
+    assert any("if this clade exists" in q.text for q in er.alternatives)
+    assert ("g.htm", ("Bazideae", "Bazidieae")) in {
+        (p, tuple(sorted((w, o)))) for p, _, w, _, o, _, _ in er.spellings}
+    assert [t for _, _, t in er.brackets] == ["[Fooideae + [Barideae + Bazideae]"]
+    assert [n for _, n in er.run_on] == ["Barideae Bazideae"]          # a lost comma
+    assert [(p, t) for p, _, _, t, _ in er.anc] == [("g.htm", "Gamales")]
+    assert er.dead_links == [("g.htm", "orders/zetalesweb.htm")]
+    assert "APWeb errata" in errata.render(er)
