@@ -20,7 +20,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY backend/ backend/
-RUN pip install --no-cache-dir ./backend
+RUN pip install --no-cache-dir -e ./backend
 
 # Built frontend (served at / by FastAPI)
 COPY --from=frontend /app/frontend/dist frontend/dist
