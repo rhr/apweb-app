@@ -5,7 +5,10 @@ If the frontend has been built (frontend/dist), it is served at / as well.
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Literal
@@ -19,6 +22,36 @@ from . import config, db, onezoom, service
 
 app = FastAPI(title="Angiosperm phylogeny knowledge store", version="0.2.0",
               docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+_PASSWORD = os.environ.get("APW_PASSWORD", "").encode()
+
+if _PASSWORD:
+    _UNAUTH = Response("Unauthorized", status_code=401,
+                       headers={"WWW-Authenticate": 'Basic realm="APW"',
+                                "Content-Type": "text/plain"})
+
+    class _BasicAuth:
+        """Pure-ASGI Basic Auth middleware (doesn't buffer streaming responses)."""
+        def __init__(self, app, **_):
+            self._app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "http":
+                headers = {k.lower(): v for k, v in scope.get("headers", [])}
+                auth = headers.get(b"authorization", b"").decode()
+                if auth.startswith("Basic "):
+                    try:
+                        _, pw = base64.b64decode(auth[6:]).decode("utf-8").split(":", 1)
+                        if hmac.compare_digest(pw.encode(), _PASSWORD):
+                            await self._app(scope, receive, send)
+                            return
+                    except Exception:
+                        pass
+                await _UNAUTH(scope, receive, send)
+                return
+            await self._app(scope, receive, send)
+
+    app.add_middleware(_BasicAuth)
 
 
 @contextmanager

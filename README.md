@@ -123,6 +123,45 @@ cd frontend && npm run build
   made public must go back to OneZoom. It is not committed here. Talk to OneZoom
   (mail@onezoom.org) before any public deployment.
 
+## Deployment (Fly.io)
+
+The app ships as a single Docker image: the Python backend serves both the API and
+the built React frontend. The SQLite database is baked in at build time.
+
+**Prerequisites:** `data/apw.sqlite` must exist locally (run `apw ingest all` first).
+Install [flyctl](https://fly.io/docs/hands-on/install-flyctl/).
+
+```bash
+# Build and test locally
+docker build -t apw-app .
+docker run -p 8080:8080 \
+  -e APW_PASSWORD=secret \
+  -e APW_ASK_MODE=server \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  apw-app
+
+# Deploy to Fly.io (free tier: 1 shared-cpu VM, no persistent volume needed)
+fly auth login
+fly launch --no-deploy        # choose a unique app name; updates app = "..." in fly.toml
+fly secrets set APW_PASSWORD=secret ANTHROPIC_API_KEY=sk-ant-...
+fly deploy
+```
+
+**Re-deploy after a new ingest:** `fly deploy` rebuilds the image with the updated DB.
+
+### Password protection (`APW_PASSWORD`)
+
+Set `APW_PASSWORD` to require HTTP Basic Auth on every request. The browser prompts
+once and remembers the password. Leave it unset for open access (the default for local
+development and future public releases).
+
+### Ask feature in server mode
+
+Set `APW_ASK_MODE=server` and `ANTHROPIC_API_KEY` to make the server answer questions
+using its own key — the API-key panel is hidden from the UI. Use this for private
+or collaborator deployments where the server pays. Keep it behind `APW_PASSWORD` or
+equivalent auth, as there is no per-user rate limiting.
+
 ## Asking questions (Claude)
 
 The **Ask** page, plus the question box on the home page, answers natural-language

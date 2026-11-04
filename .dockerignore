@@ -1,0 +1,9 @@
+.git/
+.venv/
+data/raw/
+frontend/node_modules/
+frontend/dist/
+frontend/public/oz-viewer/vendor/
+**/__pycache__/
+**/*.egg-info/
+**/.pytest_cache/

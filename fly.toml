@@ -1,0 +1,23 @@
+# Fly.io deployment configuration.
+# Before first deploy: `fly launch --no-deploy` (pick a name), then `fly deploy`.
+# Set secrets: fly secrets set APW_PASSWORD=... ANTHROPIC_API_KEY=sk-ant-...
+
+app = "apw-explorer"   # change to your chosen app name
+primary_region = "ams" # closest to you; `fly platform regions` lists options
+
+[build]
+
+[env]
+  APW_ASK_MODE = "server"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1   # keeps it warm; within free-tier allowance for 1 VM
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
