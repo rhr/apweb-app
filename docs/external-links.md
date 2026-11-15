@@ -1,6 +1,7 @@
 # Linking to Open Tree of Life and TimeTree: ideas
 
-Status: exploratory, 2026-11-14. Nothing is built yet.
+Status: exploratory, 2026-11-14. Nothing is built yet. TimeTree's terms were checked on
+2026-11-14 (see [TimeTree's terms](#timetrees-terms)).
 
 This note is based on two papers:
 
@@ -22,7 +23,7 @@ own claims. APWeb data is never overwritten.
 |---|---|---|
 | Gives us | Identifiers (OTT ids, which link to NCBI and GBIF) and a second topology, with studies that support or conflict with each node | A second, independent set of clade ages (median, confidence interval and per-study times) |
 | Keyed by | OTT ids, matched to names through its name-matching service (TNRS) | NCBI taxon ids |
-| Licence | The `opentree` package is CC0. The data licence still needs confirming. | The paper is CC-BY. Data use is described as "research and teaching (see timetree.org)", and the full collection is available on request. **Check before storing.** |
+| Licence | The `opentree` package is CC0. The data licence still needs confirming. | Free for personal research and teaching, but **redistribution of the data or anything derived from it is not permitted** without permission. See [TimeTree's terms](#timetrees-terms). |
 
 ## Open Tree of Life
 
@@ -55,6 +56,42 @@ Open Tree's source studies carry DOIs, which can link to the store's `reference`
 
 ## TimeTree 5
 
+### TimeTree's terms
+
+From the timetree.org home page, checked 2026-11-14:
+
+> "Data and syntheses accessed from TimeTree are provided openly for personal research and
+> teaching use."
+>
+> "Redistribution of TimeTree data and its transformations are not permitted."
+>
+> "Requests to use these data for all other purposes must be sent to info@timetree.org."
+>
+> "Publications utilizing the TimeTree resource or data are encouraged to include a citation to
+> TimeTree."
+
+The app is for research and education, but serving TimeTree ages from it would still be
+redistribution:
+
+- the store is meant to be public;
+- the Docker image for the Fly.io deployment includes the database file.
+
+Ages adjusted or combined with APWeb's in timetree step 2 would be "transformations", which the
+terms also exclude.
+
+So, without permission:
+
+- **Allowed:** local use as personal research, such as validating the age parser. Only our own
+  results are published: parser fixes and accuracy figures, never TimeTree's numbers.
+- **Allowed:** links from each clade's page to that clade's result on timetree.org, without
+  copying the numbers.
+- **Not allowed:** storing TimeTree ages in the store, serving them from the API, showing them on
+  pages, or feeding them into step 2.
+
+**Next step:** email info@timetree.org to describe the app (public, research and education,
+facts only, with attribution and citation) and ask whether it may store and show median ages,
+confidence intervals and study counts. Ask about per-study times too.
+
 ### API (as described in the paper)
 
 | Route | Returns |
@@ -68,29 +105,35 @@ Open Tree's source studies carry DOIs, which can link to the store's `reference`
 
 ### Uses
 
-1. **Validate our age parser.**
+Uses 2 and 3a need TimeTree's permission. Use 1 and the links do not.
+
+1. **Validate our age parser** (local only).
    - Many TimeTree studies are probably the same papers APWeb cites, such as Magallón, Bell and
      Wikström.
    - Matching TimeTree's per-study times to our `crown_age` claims, by study, would measure our
      citation binding and number parsing. That is a better check than hand samples.
-2. **A second age source for timetree step 2.**
+   - Run it as a local script. TimeTree's responses stay in the gitignored `data/` cache and never
+     go into the store.
+2. **A second age source for timetree step 2** (needs permission).
    - Store TimeTree ages as `crown_age` claims from a separate `timetree5` source.
    - Offer "TimeTree median" as a selection rule or a fallback.
    - TimeTree ages could also date nodes APWeb leaves undated, so fewer nodes need interpolating.
-3. **A method to borrow.** TimeTree does what step 2 plans:
+3. **A method to borrow** (needs no permission: it is the method, described in the paper, not
+   their data). TimeTree does what step 2 plans:
    - it takes the median across studies;
    - it applies "adjusted times" when a node is older than its parent. When a node b is older than
      its parent a, the ages of a, b and b's oldest child c are set to the average of t(a) and
      t(c), repeated until the ages are in order.
 
    Step 2b could offer this as an adjustment option and cite the paper.
+4. **Links out.** Each APWeb clade page could link to the clade's page on timetree.org, using the
+   NCBI ids from the Open Tree mapping.
 
 ## Things to be careful about
 
-- **TimeTree's licence.**
-  - Storing TimeTree ages in the public store needs explicit permission or clear terms.
-  - If neither exists, TimeTree may only be linked to, or used for checking without storing.
-  - Before building, decide whether per-study times may be stored, and how to attribute them.
+- **TimeTree's licence.** Redistribution is not permitted without permission (see
+  [TimeTree's terms](#timetrees-terms)). Until TimeTree agrees, its data stays in the local cache
+  and out of the store.
 - **Different trees.**
   - TimeTree builds on the NCBI taxonomy, refined by published timetrees. It only counts a study's
     time when the two clades are monophyletic in that study.
@@ -121,8 +164,10 @@ Open Tree's source studies carry DOIs, which can link to the store's `reference`
 - **Support from Open Tree.** Stored as claims on the Open Tree source's concepts, such as
   `supported_by` and `conflicts_with` linking to study references, then shown on the matching
   APWeb clade.
-- **TimeTree ages.** Stored as `crown_age` claims with the TimeTree source, carrying `ci`,
-  `study_count` and the per-study citations where the licence allows.
+- **TimeTree ages,** only if TimeTree gives permission. Stored as `crown_age` claims with the
+  TimeTree source, carrying `ci`, `study_count` and the per-study citations, as far as the
+  permission covers. Without permission there is no TimeTree source in the store, only links to
+  timetree.org.
 
 ## Suggested order
 
@@ -133,16 +178,19 @@ Open Tree's source studies carry DOIs, which can link to the store's `reference`
    - This is the foundation for everything else, and it unblocks OneZoom.
 2. **Compare with Open Tree.** Show support and conflict per clade on the taxon page, and add a
    disagreement report.
-3. **Add TimeTree ages,** once the licence is clear.
-   - First use them to validate the age parser.
-   - Then use them as a second age source in timetree step 2's rules.
+3. **Use TimeTree.**
+   - Now: validate the age parser locally, and add links to timetree.org.
+   - Email info@timetree.org asking for permission. This can be done at any time.
+   - If they agree: add TimeTree ages as a second age source in timetree step 2's rules.
 
 The timetree step 2 work in `docs/timetree.md` can go ahead on APWeb ages alone. Doing step 1
 here first means step 2's selection rules are designed with more than one age source in mind.
 
 ## Open questions
 
-- What do TimeTree's terms allow us to store and show publicly?
+- Will TimeTree allow the app to store and show its ages? Which fields: median, confidence
+  interval, study count, per-study times? Awaiting a reply to the email, which has not been sent
+  yet.
 - Should Open Tree data be a versioned snapshot or live API calls with a cache?
 - Should Open Tree support and conflict appear on taxon pages, or only in a comparison view or
   report?
