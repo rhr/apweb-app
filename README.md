@@ -27,7 +27,9 @@ concept >──< alignment >──< concept           (APWeb "Vitaceae" same_nam
   are linked by `alignment` rows: `same_name`, or `congruent` when both contain the same
   set of orders.
 - **Predicates** (`predicate` table): `child_of`, `has_character`, `family_count`,
-  `genus_count`, `species_count`, `distribution`, `synonym`, `discussed_in`, `conflicts_with`.
+  `genus_count`, `species_count`, `distribution`, `synonym`, `discussed_in`, `conflicts_with`,
+  `crown_age`, `stem_age`, `fossil_age` (Ma, one claim per study, read from APWeb "Age." paragraphs;
+  qualifiers hold the interval, all point estimates and any parse problems).
 - **Full-text search** (SQLite FTS5) covers labels, characters, topics and references.
 
 Schema: [`backend/src/apw/schema.sql`](backend/src/apw/schema.sql).

@@ -88,9 +88,51 @@ def taxon(con, ref: str | int, source: str | None = None, max_characters: int | 
         "SELECT cl.value, count(ci.id) AS n FROM claim cl JOIN citation ci ON ci.claim_id = cl.id "
         "WHERE cl.subject_id = ? AND cl.predicate = 'discussed_in' GROUP BY cl.id ORDER BY n DESC",
         (cid,))]
+    out["ages"] = ages(con, cid, by_pred)
     out["placement"] = _placement(by_pred.get("child_of", []), con)
     out["other_sources"] = other_sources(con, cid, keys)
     return out
+
+
+AGE_PREDICATES = ("crown_age", "stem_age", "fossil_age")
+
+
+def ages(con, cid: int, by_pred: dict | None = None) -> list[dict]:
+    """Age estimates (Ma) for a clade, one per study and age expression, with citations."""
+    if by_pred is None:
+        by_pred = defaultdict(list)
+        for cl in query.claims(con, cid):
+            by_pred[cl["predicate"]].append(cl)
+    claims = [cl for p in AGE_PREDICATES for cl in by_pred.get(p, [])]
+    if not claims:
+        return []
+    cites = defaultdict(list)
+    ids = [cl["id"] for cl in claims]
+    for r in con.execute(
+            f"SELECT ci.claim_id, ci.text, ci.confidence, r.id AS rid, r.year, r.cite_year, r.raw, r.doi "
+            f"FROM citation ci LEFT JOIN reference r ON r.id = ci.reference_id "
+            f"WHERE ci.claim_id IN ({','.join('?' * len(ids))}) ORDER BY ci.id", ids):
+        cites[r["claim_id"]].append({
+            "text": r["text"], "confidence": r["confidence"],
+            "reference": {"id": r["rid"], "year": r["year"], "raw": r["raw"], "doi": r["doi"]}
+            if r["rid"] else None})
+    out = []
+    for cl in claims:
+        q = cl["qualifiers"]
+        cs = cites.get(cl["id"], [])
+        years = [c["reference"]["year"] for c in cs if c["reference"] and c["reference"]["year"]] \
+            or [y for c in cs for y in re.findall(r"\b(?:1[6-9]|20)\d\d", c["text"])[:1]]
+        out.append({
+            "id": cl["id"], "kind": cl["predicate"].removesuffix("_age"),
+            "value": float(cl["value"]), "points": q.get("points", []), "form": q.get("form"),
+            "older": q.get("older"), "younger": q.get("younger"), "approx": bool(q.get("approx")),
+            "text": q.get("text"), "methods": q.get("methods", []),
+            "kind_explicit": q.get("kind_explicit"), "subject": q.get("subject"),
+            "subject_resolved": q.get("subject_resolved"), "stated_under": q.get("stated_under"),
+            "problems": q.get("problems", []), "locator": cl["locator"], "citations": cs,
+            "year": max(years) if years else None})
+    order = {k: i for i, k in enumerate(("crown", "stem", "fossil"))}
+    return sorted(out, key=lambda a: (order[a["kind"]], a["year"] or "9999", -a["value"]))
 
 
 def _character(cl: dict) -> dict:

@@ -850,3 +850,33 @@ ol.refs li {
   gap: 0.75rem;
   align-items: baseline;
 }
+
+/* age estimates */
+.age-tabs { display: flex; gap: 0.4rem; margin: 0.4rem 0 0.6rem; flex-wrap: wrap; }
+.age-tabs button {
+  font: inherit; font-size: 0.85rem; padding: 0.2rem 0.7rem; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer;
+}
+.age-tabs button[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.age-grid {
+  display: grid; grid-template-columns: minmax(8rem, 15rem) 1fr; column-gap: 0.75rem;
+  align-items: center; font-size: 0.85rem;
+}
+.age-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 18px; }
+.age-warn { color: var(--rank-family); }
+.age-src { text-decoration: none; color: var(--muted); }
+.age-axis text { font-size: 10px; fill: var(--muted); }
+.age-axis line, .age-row .grid { stroke: var(--line); stroke-width: 1; }
+.age-row .ci { stroke: var(--muted); stroke-width: 1.5; }
+.age-row .range { stroke: var(--accent); stroke-width: 7; stroke-linecap: round; opacity: 0.75; }
+.age-row .pt { fill: var(--accent); stroke: var(--surface); stroke-width: 1; }
+.age-row.stem .pt, .age-row.stem .range { fill: var(--rank-clade); stroke: var(--rank-clade); }
+.age-row.stem .pt { stroke: var(--surface); }
+.age-row.fossil .pt { fill: var(--rank-family); }
+.age-row.fossil .range { stroke: var(--rank-family); }
+.age-unit { text-align: center; margin-top: 0.2rem; }
+@media (max-width: 560px) {
+  .age-grid { grid-template-columns: 1fr; }
+  .age-grid > div:empty { display: none; }
+  .age-label { margin-top: 0.35rem; }
+}

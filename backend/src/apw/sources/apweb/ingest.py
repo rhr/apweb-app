@@ -29,7 +29,7 @@ from rich.console import Console
 
 from ... import db
 from ...db import Store, norm
-from . import citations, crawl, errata, pages, references
+from . import ages, citations, crawl, errata, pages, references
 
 console = Console(stderr=True)
 
@@ -191,6 +191,19 @@ class Assembler:
 
     def node_of(self, h: pages.Header) -> Node:
         return self.node_for_key(self._keys(h)[0])
+
+    def lookup(self, label: str) -> str | None:
+        """Key of the clade a name or bracket written in prose refers to, if it has one."""
+        label = label.strip()
+        if label.startswith("["):
+            g = pages.parse_brackets(label)
+            if g is None:
+                return None
+            key = self.uf.find(self._group_key(g))
+        else:
+            key = self.uf.find(self.atom_key(label))
+        node = self.nodes.get(key)
+        return key if node is not None and (node.headers or node.implicit_labels) else None
 
     # -- conflicting clades
 
@@ -792,6 +805,53 @@ def ingest(snapshot: str | None = None, con=None) -> dict:
                     store.citation(claim, m.text, ref, conf, n)
                     stats["citations"] += 1
                     stats["citations_resolved"] += ref is not None
+
+    # clade ages: one claim per estimate, on the clade it dates
+    records, _ = ages.collect(asm)
+    contexts: dict[str, set[str]] = {}
+    done = set()
+    for r in records:
+        e = r.est
+        pred = "fossil_age" if e.basis == "fossil" else f"{e.kind}_age"
+        sig = (r.target, pred, e.text, e.cite.text if e.cite else None)
+        if sig in done:         # the same sentence under two headers of one clade
+            continue
+        done.add(sig)
+        q: dict = {"points": e.points, "form": e.form, "text": e.text}
+        if e.older is not None:
+            q["older"] = e.older
+        if e.younger is not None:
+            q["younger"] = e.younger
+        if e.approx:
+            q["approx"] = True
+        if pred != "fossil_age":
+            q["kind_explicit"] = e.kind_explicit
+        if e.methods:
+            q["methods"] = e.methods
+        if r.subject_resolved is not None:
+            q["subject"] = e.subject
+            q["subject_resolved"] = r.subject_resolved
+        if r.target != r.node:
+            q["stated_under"] = asm.nodes[r.node].label
+        if e.problems:
+            q["problems"] = e.problems
+        claim = store.claim(cid[r.target], pred, value=f"{e.value:g}", qualifiers=q,
+                            locator=page_url(r.header.page, r.header.anchor), index=False)
+        stats[pred] += 1
+        if e.pers_comm:
+            store.citation(claim, e.pers_comm, None, 1.0, 0)
+        if e.cite is None:
+            continue
+        if not resolver.known(e.cite):
+            store.citation(claim, e.cite.text, None, 0.0, 0)
+            continue
+        if r.target not in contexts:
+            contexts[r.target] = context(r.target)
+        for y in e.cite.years:
+            ref, conf, n = resolver.resolve(e.cite, y, contexts[r.target])
+            store.citation(claim, e.cite.text, ref, conf, n)
+            stats["age_citations_resolved"] += ref is not None
+
     con.commit()
     stats.update(nodes=len(asm.nodes), references=n_refs, parented=len(parents))
 

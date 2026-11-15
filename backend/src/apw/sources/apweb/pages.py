@@ -156,6 +156,7 @@ class Header:
     dagger: bool
     characters: list[Character] = field(default_factory=list)
     topics: dict[str, list[citations.Mention]] = field(default_factory=dict)
+    age_texts: list[str] = field(default_factory=list)   # 'Age.' paragraphs, as written
     synonyms: list[tuple[str, str]] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
     distribution: str | None = None
@@ -503,6 +504,8 @@ def parse_page(page: str, html: str, families: set[str] | None = None) -> list[H
             topic = "/".join(t for t in (main_topic, sub) if t) or "General"
             if topic.startswith("Note"):
                 continue
+            if main_topic == "Age":
+                cur.age_texts.append(text)
             mentions = citations.extract(text)
             if mentions:
                 # APWeb discusses a family's evolution/phylogeny after listing its

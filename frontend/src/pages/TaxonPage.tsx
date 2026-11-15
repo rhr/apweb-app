@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Character, type Citations, type Taxon } from "../api";
+import { AgeChart } from "../components/AgeChart";
 import { ConceptLink, RankBadge, SourceBadge, Status, fmtNum, shortLabel, useAsync } from "../lib";
 
 export function TaxonPage() {
@@ -61,6 +62,7 @@ function TaxonView({ t }: { t: Taxon }) {
         <Characters t={t} />
       </div>
 
+      <Ages t={t} />
       <Literature t={t} />
     </article>
   );
@@ -244,6 +246,22 @@ function Characters({ t }: { t: Taxon }) {
           </a>
         </p>
       )}
+    </section>
+  );
+}
+
+function Ages({ t }: { t: Taxon }) {
+  if (!t.ages?.length) return null;
+  return (
+    <section>
+      <h2>
+        Age <span className="count">{t.ages.length} estimates</span>
+      </h2>
+      <p className="muted small">
+        Divergence-time estimates the source reports for this clade, read from its “Age” paragraphs. Hover a row for
+        the age as written; ⚠ marks statements the parser could not read cleanly.
+      </p>
+      <AgeChart ages={t.ages} />
     </section>
   );
 }

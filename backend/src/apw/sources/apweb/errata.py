@@ -18,6 +18,9 @@ Sections:
   brackets         header lines whose [ and ] do not balance
   anc              anc attributes naming an anchor that exists nowhere on the site
   links            order pages linked from other pages that the crawl could not fetch
+  ages             'Age.' paragraphs the age parser could not read cleanly (ages.PROBLEMS):
+                   intervals that don't contain their estimate, typos in numbers, ages with
+                   no citation, clades named that have no header
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup, Comment
 
 from ... import config
-from . import crawl, pages
+from . import ages, crawl, pages
 
 ALT_MARKER = re.compile(r"(?i)\bif (?:this|the|a)\b[^:]{0,30}?\b(?:clade|node|exists?)\b|\bor - ")
 SUFFIXES = ("oideae", "odeae", "aceae", "ineae", "inae", "odae", "idae", "anae", "ales", "eae")
@@ -75,6 +78,8 @@ class Errata:
     dead_links: list[tuple[str, str]] = field(default_factory=list)
     dead_link_targets: dict[str, str] = field(default_factory=dict)  # broken link -> likely page
     duplicates: list[list[str]] = field(default_factory=list)
+    ages: list[ages.Issue] = field(default_factory=list)
+    n_ages: int = 0                  # age estimates read, for scale
 
 
 def _suffix(w: str) -> str | None:
@@ -266,6 +271,15 @@ def build(snapshot: str, manifest: dict, htmls: dict[str, str], asm) -> Errata:
         if rel.startswith("orders/"):
             by_sha[meta["sha256"]].append(rel.removeprefix("orders/"))
     out.duplicates = sorted(sorted(v) for v in by_sha.values() if len(v) > 1)
+
+    # -- age paragraphs; a sentence repeated on several pages is listed once
+    records, issues = ages.collect(asm)
+    out.n_ages = len(records)
+    seen = set()
+    for i in sorted(issues, key=lambda i: (list(ages.PROBLEMS).index(i.kind), i.page, i.label)):
+        if (i.kind, i.text) not in seen:
+            seen.add((i.kind, i.text))
+            out.ages.append(i)
     return out
 
 
@@ -339,6 +353,7 @@ h1 { font-size: 2.3rem; line-height: 1.15; margin: 0 0 .4rem; }
 h2 { font-size: 1.45rem; margin: 3rem 0 .4rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
 h2 .n { color: var(--accent); margin-right: .4em; }
 h3 { font-size: 1.02rem; margin: 0 0 .5rem; font-family: var(--mono); font-weight: 400; overflow-wrap: anywhere; }
+h3.sub { font-family: var(--body, inherit); font-size: .95rem; margin: 1.4rem 0 0; }
 p { max-width: 68ch; }
 a { color: var(--accent); text-underline-offset: 2px; }
 a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -396,6 +411,14 @@ def render(er: Errata) -> str:
     dups = "".join(f"<li>{' = '.join(_e(p) for p in d)}</li>" for d in er.duplicates)
     stray = ", ".join(_link(p, a, f"{p}#{a}") for p, a in er.stray_anchors)
     n_links = len(er.dead_links) + len(er.duplicates)
+    by_kind = defaultdict(list)
+    for i in er.ages:
+        by_kind[i.kind].append(i)
+    age_secs = "".join(
+        f"<h3 class=sub>{_e(ages.PROBLEMS[k][:1].upper() + ages.PROBLEMS[k][1:])} ({len(v)})</h3>" + details(len(v), "items", _table(
+            ["Page", "Under", "Text"],
+            [[_link(i.page, i.anchor), _e(i.label), f"<code>{_e(i.text)}</code>"] for i in v]))
+        for k, v in sorted(by_kind.items(), key=lambda kv: list(ages.PROBLEMS).index(kv[0])))
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -417,6 +440,7 @@ found while building a structured index of the site. Each item links to the page
 <li><b>{len(er.brackets)}</b><a href="#brackets">unbalanced brackets</a></li>
 <li><b>{len(er.anc)}</b><a href="#anc">anc links to missing anchors</a></li>
 <li><b>{n_links}</b><a href="#links">links</a></li>
+<li><b>{len(er.ages)}</b><a href="#ages">age statements</a></li>
 </ul>
 <p class="pages">Snapshot {_e(er.snapshot)}: {er.n_pages} order pages under <code>apweb/orders/</code>.
 Text inside HTML comments is not read.</p>
@@ -457,6 +481,13 @@ on the site. Readers are not affected, but a tree built from the links breaks. W
 <h2 id="links"><span class="n">7</span>Links</h2>
 {'<ul>' + links + '</ul>' if links else '<p class=dim>No dead links between order pages.</p>'}
 {'<p class="sec-intro">Pages served under more than one name, with identical content:</p><ul>' + dups + '</ul>' if dups else ''}
+
+<h2 id="ages"><span class="n">8</span>Age statements</h2>
+<p class="sec-intro">{er.n_ages} age estimates were read from the “Age.” paragraphs. The statements below could not be read
+cleanly: an interval that does not contain its estimate (often a missing or misplaced number), a number with “Ma” in an
+unexpected form (a missing hyphen, a comma for a decimal point, an extra bracket), an age with no citation next to it,
+or a clade named for an age that has no header on the site. “My” is listed because it is used both for ages and for durations.</p>
+{age_secs or '<p class=dim>None.</p>'}
 
 <footer>Generated automatically by the APWeb ingest. Items are found by machine and may include deliberate choices that the
 page text explains nearby.</footer>

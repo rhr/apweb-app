@@ -333,3 +333,88 @@ def test_crawl_alias_of_broken_order_links():
     assert crawl.alias_of("orders/Sporing.html.htm", known) == "orders/Sporing.html"
     assert crawl.alias_of("orders/dasypogonalesweb.html", known) is None
 
+
+def test_age_parse_estimates_and_citations():
+    from apw.sources.apweb import ages
+    text = ("Age. Wikström et al. (2001) suggested an age for crown Aristolochiaceae of "
+            "(128-)122, 108(-102) Ma, Bell et al. (2010) ages of (126-)104, 91(-72) Ma, and "
+            "ages of (124-)101(-76.5) Ma were suggested by Naumann et al. (2013); the age is "
+            "ca 82.3 Ma (Tank et al. 2015: Table S2) or 95-75 Ma (Cook & Crisp 2005); an age of "
+            "ca 102.6 Ma for a clade [Lactoridaceae + [Aristolochiaceae + Asaraceae]] was "
+            "suggested by Tank et al. (2015). The stem age of Bixaceae was 73.2 Ma (Tank et al. 2015).")
+    es, probs = ages.parse(text)
+    got = [(e.text, e.points, e.older, e.younger, e.form, e.cite and e.cite.text) for e in es]
+    assert got == [
+        ("(128-)122, 108(-102) Ma", [122, 108], 128, 102, "points", "Wikström et al. (2001)"),
+        ("(126-)104, 91(-72) Ma", [104, 91], 126, 72, "points", "Bell et al. (2010)"),
+        ("(124-)101(-76.5) Ma", [101], 124, 76.5, "point", "Naumann et al. (2013)"),
+        ("ca 82.3 Ma", [82.3], None, None, "point", "Tank et al. 2015"),
+        ("95-75 Ma", [95, 75], None, None, "range", "Cook & Crisp 2005"),
+        ("ca 102.6 Ma", [102.6], None, None, "point", "Tank et al. (2015)"),
+        ("73.2 Ma", [73.2], None, None, "point", "Tank et al. 2015"),
+    ]
+    assert es[0].kind == "crown" and es[0].kind_explicit and es[0].subject == "Aristolochiaceae"
+    assert es[4].value == 85 and es[3].approx
+    assert es[5].subject == "[Lactoridaceae + [Aristolochiaceae + Asaraceae]]"
+    assert (es[6].kind, es[6].subject) == ("stem", "Bixaceae")
+    assert not probs and not any(e.problems for e in es)
+
+
+def test_age_parse_problems_and_fossils():
+    from apw.sources.apweb import ages
+    es, probs = ages.parse("Age. This node is (33-)14(-22) Ma (Crowl et al. 2016), or "
+                           "(51.6-)30.1(20.2) Ma (Guo et al. 2020) and lasted ca 30 My. "
+                           "Fossil fruits are known from deposits ca 62 Ma in Greenland.")
+    assert [e.problems for e in es] == [["interval_order"], []]
+    assert es[1].basis == "fossil" and es[1].text == "ca 62 Ma"
+    assert sorted(p.kind for p in probs) == ["ambiguous_unit", "unparsed"]
+
+
+def test_citation_after_age_and_stray_word_before_comma():
+    from apw.sources.apweb import citations
+    ms = citations.extract("(128-)122(-102) Ma, Bell et al. (2010); crown Piperales, Wikström et al. (2001)")
+    assert [m.text for m in ms] == ["Bell et al. (2010)", "Piperales, Wikström et al. (2001)"]
+    r = citations.Resolver()
+    r.add(citations.RefKey(1, "wikstrom", "2001", 3, None, None, "wikstrom bremer"))
+    assert r.known(ms[1]) and ms[1].text == "Wikström et al. (2001)"
+    assert r.resolve(ms[1], "2001")[0] == 1
+
+
+def test_age_binding_prefers_narrative_citation_before():
+    from apw.sources.apweb import ages
+    es, _ = ages.parse("Age. Ages suggested by Cook and Crisp (2005) are 95-75 Ma and by Xiang et al. "
+                       "(2014a) rather older, (107.3-)105.2(-101.3) Ma, ca 87.0 Ma in Zhou et al. (2021) "
+                       "and (124-)101 Ma by Naumann et al. (2013), 151.6 Ma by Massoni et al. (2015a).")
+    assert [e.cite.text for e in es] == ["Cook and Crisp (2005)", "Xiang et al. (2014a)",
+                                         "Zhou et al. (2021)", "Naumann et al. (2013)",
+                                         "Massoni et al. (2015a)"]
+
+
+def test_age_plus_minus_and_cf_after_year():
+    from apw.sources.apweb import ages, citations
+    es, _ = ages.parse("Age. Janssens et al. (2009) date them to 20±8.6 Ma.")
+    assert (es[0].points, es[0].older, es[0].younger) == ([20.0], 28.6, 11.4)
+    assert [m.years for m in citations.extract("ca 146 Ma (Zeng et al. 2017, c.f. Foster & Ho 2017)")] \
+        == [["2017"], ["2017"]]
+
+
+def test_age_binding_not_across_a_clause():
+    from apw.sources.apweb import ages
+    es, _ = ages.parse("Age. Ages of 104.9 Ma in H.-L. Li et al. (2015) show little spread, while the "
+                       "youngest dates, at around 68.6-62.2 Ma, are those of Xue et al. (2012), and of "
+                       "ca 61 Ma, that of Quirk et al. (2012).")
+    assert [e.cite.text for e in es] == ["H.-L. Li et al. (2015)", "Xue et al. (2012)", "Quirk et al. (2012)"]
+
+
+def test_age_binding_and_in_starts_next_study():
+    from apw.sources.apweb import ages
+    es, _ = ages.parse("Age. Ages in Serna-Sánchez et al. (2021) are ca 89.8 Ma (relaxed clock) and in "
+                       "G. Zhang et al. (2023) ca 50.7 Ma.")
+    assert [e.cite.text for e in es] == ["Serna-Sánchez et al. (2021)", "G. Zhang et al. (2023)"]
+
+
+def test_age_form_and_versus_between():
+    from apw.sources.apweb import ages
+    es, _ = ages.parse("Age. Magallón and Castillo (2009) offer 175 and 119 Ma, and Huang et al. (2016) "
+                       "somewhere between ca 52 and 41 Ma.")
+    assert [e.form for e in es] == ["alternatives", "range"]

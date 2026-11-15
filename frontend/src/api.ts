@@ -60,6 +60,7 @@ export interface Taxon extends Concept {
   n_apomorphies: number;
   characters: Character[];
   topics: { topic: string; n_citations: number }[];
+  ages: AgeEstimate[];
   placement: {
     parent_id: number;
     score: number | null;
@@ -69,6 +70,31 @@ export interface Taxon extends Concept {
     locator: string | null;
   } | null;
   other_sources: OtherSource[];
+}
+
+export interface AgeEstimate {
+  id: number;
+  kind: "crown" | "stem" | "fossil";
+  value: number; // representative age, Ma
+  points: number[];
+  form: "point" | "points" | "range" | "alternatives" | null;
+  older: number | null;
+  younger: number | null;
+  approx: boolean;
+  text: string | null;
+  methods: string[];
+  kind_explicit: boolean | null;
+  subject: string | null;
+  subject_resolved: boolean | null;
+  stated_under: string | null;
+  problems: string[];
+  locator: string | null;
+  year: string | null;
+  citations: {
+    text: string;
+    confidence: number;
+    reference: { id: number; year: string | null; raw: string; doi: string | null } | null;
+  }[];
 }
 
 export interface TreeNode extends Concept {

@@ -27,6 +27,15 @@ PREDICATES = {
     "synonym": ("literal", "A name treated as a synonym of the subject."),
     "discussed_in": ("literal", "Literature discussing the subject on a topic "
                      "(value = topic, citations attached)."),
+    "crown_age": ("literal", "Estimated age (Ma) of the subject's crown group, from one study "
+                  "(citation attached). Value: representative age (median point, or midpoint of "
+                  "a range). Qualifiers: points, form (point|points|range|alternatives), older/"
+                  "younger (interval), approx, methods, kind_explicit, subject/subject_resolved "
+                  "(clade named in the prose), stated_under, problems, text."),
+    "stem_age": ("literal", "Estimated age (Ma) of the subject's stem (its split from its "
+                 "sister). Value and qualifiers as for crown_age."),
+    "fossil_age": ("literal", "Age (Ma) of a fossil attributed to the subject or near it: "
+                   "evidence for a minimum age, not an estimate. Qualifiers as for crown_age."),
 }
 
 
