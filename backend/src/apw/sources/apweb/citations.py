@@ -16,13 +16,13 @@ from ...db import norm
 _PARTICLE = r"(?:(?:de|De|van|Van|von|Von|der|den|da|Da|dos|du|Du|la|La|le|Le|del|Del|ter|d'|D')\s?)"
 _SURNAME = rf"{_PARTICLE}*[A-ZÀ-ÖØ-Þ][\w'’]*(?:-[A-ZÀ-ÖØ-Þ]?[\w'’]+)*"
 _YEAR = r"(?:1[6-9]\d\d|20\d\d)[a-z]?"
-_YEARS = rf"{_YEAR}(?:\s*,\s*(?:{_YEAR}|[a-z]\b))*"
+_YEARS = rf"{_YEAR}(?:\s*,\s*(?:{_YEAR}|[a-z]\b(?!\.)))*"   # not '2017, c.f.'
 
 CITE = re.compile(
-    rf"(?:(?P<init>(?:[A-Z]\.[\s-]?)+)\s?|(?P<given>[A-Z][a-z]+)\s)?"
+    rf"(?<![\w'’])(?:(?P<init>(?:[A-Z]\.[\s-]?)+)\s?|(?P<given>[A-Z][a-z]+)\s)?"
     rf"(?P<a1>{_SURNAME})"
     rf"(?:(?:,\s(?P<a1b>{_SURNAME}))?\s+et\s+al\.?(?P<etal>)|\s+(?:and|&)\s+(?P<a2>{_SURNAME}))?"
-    rf"(?:\s*\((?P<yp>{_YEARS})(?=[\s):;,])|\s+(?P<yb>{_YEARS})\b)")
+    rf"(?:\s*\((?P<yp>{_YEARS})(?=[\s):;,/])|\s+(?P<yb>{_YEARS})\b)")
 
 # Capitalized words that precede years but aren't authors.
 STOP = {w.lower() for w in """In By Since From Until Before After About Ca The Up To Of Ma My Mya
@@ -58,10 +58,14 @@ def _expand_years(s: str) -> list[str]:
 
 def extract(text: str) -> list[Mention]:
     mentions = []
-    for m in CITE.finditer(text):
+    pos = 0
+    while (m := CITE.search(text, pos)) is not None:
         a1 = m["a1"]
         if a1.lower() in STOP:
+            # '... 102 Ma, Bell et al. (2010)': retry just after the stop word
+            pos = m.end("a1")
             continue
+        pos = m.end()
         init = m["init"] or (m["given"][0] if m["given"] else None)
         mentions.append(Mention(
             text=m.group(0).strip() + (")" if m["yp"] and not m.group(0).endswith(")") else ""),
@@ -99,6 +103,11 @@ class Resolver:
             compound = norm(f"{m.given} {m.first}")       # 'Venkata Rao'
             if compound in self.surnames:
                 m.first, m.given = compound, None
+        if m.first not in self.surnames and m.also in self.surnames:
+            # 'crown group Piperales, Wikström et al. (2001)': a word before the comma,
+            # not a first author as in 'Jaillon, Aury et al. (2007)'
+            m.first, m.also, m.initials = m.also, None, None
+            m.text = m.text.split(", ", 1)[-1]
         return m.first in self.surnames
 
     def resolve(self, m: Mention, year: str,
