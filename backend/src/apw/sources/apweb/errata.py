@@ -73,6 +73,7 @@ class Errata:
     anc: list[tuple[str, str | None, str, str, str | None]] = field(default_factory=list)
     stray_anchors: list[tuple[str, str]] = field(default_factory=list)
     dead_links: list[tuple[str, str]] = field(default_factory=list)
+    dead_link_targets: dict[str, str] = field(default_factory=dict)  # broken link -> likely page
     duplicates: list[list[str]] = field(default_factory=list)
 
 
@@ -256,6 +257,10 @@ def build(snapshot: str, manifest: dict, htmls: dict[str, str], asm) -> Errata:
             if rel not in manifest:
                 out.dead_links.append((p, rel))
     out.dead_links = sorted(set(out.dead_links))
+    fetched = [r for r in manifest if r.startswith("orders/")]
+    for _, rel in out.dead_links:
+        if (target := crawl.alias_of(rel, fetched)) is not None:
+            out.dead_link_targets[rel] = target
     by_sha = defaultdict(list)
     for rel, meta in manifest.items():
         if rel.startswith("orders/"):
@@ -383,8 +388,11 @@ def render(er: Errata) -> str:
                  [[_link(p), f"{_e(l)} <span class=dim>#{_e(o or '')}</span>", f"<code>{_e(t)}</code>",
                    f"<code>{_e(s)}</code>" if s else "<span class=dim>none close</span>"]
                   for p, o, l, t, s in er.anc])
-    links = "".join(f"<li>{_link(p)} links to <code>{_e(rel)}</code>, which could not be fetched</li>"
-                    for p, rel in er.dead_links)
+    def _meant(rel: str) -> str:
+        t = er.dead_link_targets.get(rel)
+        return f" (probably meant {_link(t.removeprefix('orders/'))})" if t else ""
+    links = "".join(f"<li>{_link(p)} links to <code>{_e(rel)}</code>, which could not be fetched"
+                    f"{_meant(rel)}</li>" for p, rel in er.dead_links)
     dups = "".join(f"<li>{' = '.join(_e(p) for p in d)}</li>" for d in er.duplicates)
     stray = ", ".join(_link(p, a, f"{p}#{a}") for p, a in er.stray_anchors)
     n_links = len(er.dead_links) + len(er.duplicates)

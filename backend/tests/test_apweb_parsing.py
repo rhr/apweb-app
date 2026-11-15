@@ -318,4 +318,18 @@ def test_errata_lists_conflicts_typos_and_broken_links():
     assert [n for _, n in er.run_on] == ["Barideae Bazideae"]          # a lost comma
     assert [(p, t) for p, _, _, t, _ in er.anc] == [("g.htm", "Gamales")]
     assert er.dead_links == [("g.htm", "orders/zetalesweb.htm")]
+    assert er.dead_link_targets == {}
     assert "APWeb errata" in errata.render(er)
+
+
+def test_crawl_alias_of_broken_order_links():
+    from apw.sources.apweb import crawl
+    known = {"orders/piperalesweb2.htm", "orders/dillenialesweb.html", "orders/sapindalesweb.htm",
+             "orders/lauralesweb.htm", "orders/Sporing.html", "orders/sporing.html"}
+    assert crawl.alias_of("orders/piperalesweb.htm", known) == "orders/piperalesweb2.htm"
+    assert crawl.alias_of("orders/dillenialesweb.htm", known) == "orders/dillenialesweb.html"
+    assert crawl.alias_of("orders/sapindalesweb2.htm", known) == "orders/sapindalesweb.htm"
+    assert crawl.alias_of("orders/lauralesweb\\.htm", known) == "orders/lauralesweb.htm"
+    assert crawl.alias_of("orders/Sporing.html.htm", known) == "orders/Sporing.html"
+    assert crawl.alias_of("orders/dasypogonalesweb.html", known) is None
+

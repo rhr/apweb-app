@@ -86,16 +86,25 @@ def crawl(snapshot: str | None = None, delay: float = 2.0, force: bool = False) 
         index = fetch(INDEX_PAGES[0])
         if index is None:
             raise RuntimeError("could not fetch APWeb index")
-        # Follow links between order pages too: some (e.g. Dasypogonales) aren't in the sidebar.
+        # Follow links between order pages too: some (e.g. characters.htm) aren't in the sidebar.
+        # Links between pages are often stale or mistyped ('piperalesweb.htm' for
+        # 'piperalesweb2.htm', 'lauralesweb\\.htm'); skip those that alias a page we
+        # already have instead of requesting a URL that 404s.
         queue, seen = order_pages(decode(index)), set()
+        known = set(queue)
         while queue:
             rel = queue.pop(0)
             if rel in seen:
                 continue
             seen.add(rel)
             page = fetch(rel)
-            if page is not None:
-                queue.extend(p for p in linked_order_pages(decode(page)) if p not in seen)
+            if page is None:
+                known.discard(rel)
+                continue
+            for p in linked_order_pages(decode(page)):
+                if p not in known and alias_of(p, known) is None:
+                    known.add(p)
+                    queue.append(p)
         for rel in REFERENCE_PAGES:
             fetch(rel)
     return out
@@ -110,3 +119,19 @@ def linked_order_pages(html: str) -> list[str]:
         elif "/" not in href and ":" not in href:
             out.add("orders/" + href)
     return sorted(out)
+
+
+def _page_key(rel: str) -> str:
+    """Loose identity of an order page: case, stray backslashes, .htm/.html (even
+    doubled) and a trailing '2' (APWeb's renamed pages) are all ignored."""
+    stem = re.sub(r"(\.html?)+$", "", rel.lower().replace("\\", ""))
+    return stem.removesuffix("2")
+
+
+def alias_of(rel: str, known) -> str | None:
+    """The known page a (possibly broken) link most likely means, or None."""
+    if rel in known:
+        return rel
+    key = _page_key(rel)
+    matches = sorted(k for k in known if _page_key(k) == key)
+    return matches[0] if matches else None
