@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import { BASE } from "./api";
 import { SearchBox } from "./components/SearchBox";
 import { SourceProvider, sourceLabel, useSources } from "./lib";
 import { AskPage } from "./pages/AskPage";
@@ -78,7 +79,7 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={BASE.replace(/\/$/, "") || "/"}>
       <SourceProvider>
         <App />
       </SourceProvider>

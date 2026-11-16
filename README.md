@@ -151,6 +151,28 @@ fly deploy
 
 **Re-deploy after a new ingest:** `fly deploy` rebuilds the image with the updated DB.
 
+## Deployment (Apache reverse proxy, sub-path)
+
+To run behind an existing Apache at `https://<host>/apweb/` (files in `deploy/`):
+
+```bash
+cd frontend && npm ci && scripts/fetch-onezoom.sh && npm run build -- --base=/apweb/
+cd ../backend && python3 -m venv .venv && .venv/bin/pip install -e . && .venv/bin/apw ingest all
+
+sudo install -d -m 755 /etc/apweb
+sudo install -m 600 deploy/apweb.env.example /etc/apweb/apweb.env   # then set the password and key
+sudo cp deploy/apweb.service /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemctl enable --now apweb                                    # uvicorn on 127.0.0.1:8010
+# paste deploy/apache-apweb.conf into the host's <VirtualHost *:443>, then:
+sudo apache2ctl configtest && sudo systemctl reload apache2
+```
+
+Apache strips `/apweb` before proxying. The frontend gets the prefix at build time
+(`--base`, read as `import.meta.env.BASE_URL`), and uvicorn's `--root-path` gives it to
+the API docs. **After a new ingest:** `sudo systemctl restart apweb`. **After frontend
+changes:** rebuild with the same `--base`; no restart needed. Details, updating and
+troubleshooting: [`docs/deployment-apache.md`](docs/deployment-apache.md).
+
 ### Password protection (`APW_PASSWORD`)
 
 Set `APW_PASSWORD` to require HTTP Basic Auth on every request. The browser prompts

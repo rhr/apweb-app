@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
+import { api, BASE } from "../api";
 import { SearchBox } from "../components/SearchBox";
 import { RankBadge, Status, sourceKey, useAsync, useSources } from "../lib";
 import { SelectedSummary, SideSource } from "./TreePage";
@@ -31,7 +31,7 @@ export function OneZoomPage() {
 
   // a new source reloads the viewer, keeping the current view
   const src = useMemo(
-    () => key && `/oz-viewer/index.html?source=${encodeURIComponent(key)}&view=${viewRef.current}`,
+    () => key && `${BASE}oz-viewer/index.html?source=${encodeURIComponent(key)}&view=${viewRef.current}`,
     [key],
   );
   useEffect(() => {

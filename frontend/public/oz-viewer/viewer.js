@@ -10,7 +10,7 @@
   window.OZstrings = await fetch("vendor/js_strings.json").then((r) => r.json());
   window.OZstrings["No common name"] = ""; // the store has no vernacular names
   const params = new URLSearchParams(location.search);
-  const base = "/api/oz/" + encodeURIComponent(params.get("source") || "apweb");
+  const base = "../api/oz/" + encodeURIComponent(params.get("source") || "apweb");
   const post = (msg) => window.parent.postMessage(Object.assign({ from: "onezoom" }, msg), location.origin);
 
   // OneZoom requests data through jQuery.ajax; this is the part of it that it uses.

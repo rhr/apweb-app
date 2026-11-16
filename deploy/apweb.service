@@ -1,0 +1,24 @@
+# systemd unit: the APW backend (API + built frontend) on 127.0.0.1:8010, mounted by
+# Apache at /apweb/ (see apache-apweb.conf). Install:
+#   sudo cp deploy/apweb.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now apweb
+[Unit]
+Description=APWeb phylogeny knowledge store (uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=rree
+Group=rree
+WorkingDirectory=/home/rree/src/apweb-app/backend
+EnvironmentFile=/etc/apweb/apweb.env
+# --root-path: Apache strips /apweb before proxying; this tells FastAPI the public prefix
+# (used by /api/docs). The app keeps conversations in memory, so run a single worker.
+ExecStart=/home/rree/src/apweb-app/backend/.venv/bin/uvicorn apw.api:app \
+    --host 127.0.0.1 --port 8010 --root-path /apweb \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

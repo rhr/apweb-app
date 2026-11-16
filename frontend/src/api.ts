@@ -1,5 +1,9 @@
 // Typed client for the backend API (backend/src/apw/api.py, shapes from service.py).
 
+/** Where the app is mounted, with a trailing slash: "/" by default, or e.g. "/apweb/" when
+ * built with `npm run build -- --base=/apweb/` to run behind a reverse proxy sub-path. */
+export const BASE = import.meta.env.BASE_URL;
+
 export interface Concept {
   id: number;
   label: string;
@@ -198,7 +202,7 @@ async function get<T>(path: string, params: Record<string, string | number | boo
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
   }
-  const url = `/api${path}${qs.size ? `?${qs}` : ""}`;
+  const url = `${BASE}api${path}${qs.size ? `?${qs}` : ""}`;
   const r = await fetch(url);
   if (!r.ok) {
     let msg = r.statusText;
@@ -239,7 +243,7 @@ export async function askStream(
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.apiKey) headers["X-Anthropic-Api-Key"] = opts.apiKey; // used for this request only
-  const r = await fetch("/api/ask", {
+  const r = await fetch(`${BASE}api/ask`, {
     method: "POST",
     headers,
     body: JSON.stringify({ question, conversation_id: opts.conversationId, model: opts.model }),

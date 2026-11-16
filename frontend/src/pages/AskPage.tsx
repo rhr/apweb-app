@@ -2,7 +2,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, askStream, type AskEvent } from "../api";
+import { api, askStream, BASE, type AskEvent } from "../api";
 import { ApiKeyPanel, loadKey } from "../components/ApiKeyPanel";
 import { useAsync } from "../lib";
 
@@ -63,17 +63,23 @@ function describe(a: Activity): string {
 
 function Markdown({ text }: { text: string }) {
   const nav = useNavigate();
+  // internal links (/taxon/…, /reference/…) get the app's base path, so they also work
+  // when opened in a new tab
   const html = useMemo(
-    () => DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true }) as string),
+    () =>
+      DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true }) as string).replace(
+        /href="\/(?!\/)/g,
+        `href="${BASE}`,
+      ),
     [text],
   );
-  // route internal links (/taxon/…, /reference/…) through the router
+  // and are routed through the router on a plain click
   const onClick = (e: MouseEvent<HTMLDivElement>) => {
     const a = (e.target as HTMLElement).closest("a");
     const href = a?.getAttribute("href");
-    if (a && href?.startsWith("/") && !e.metaKey && !e.ctrlKey) {
+    if (a && href?.startsWith(BASE) && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
-      nav(href);
+      nav("/" + href.slice(BASE.length));
     } else if (a && href && !href.startsWith("/")) {
       a.setAttribute("target", "_blank");
       a.setAttribute("rel", "noreferrer");
